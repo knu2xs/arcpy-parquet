@@ -91,3 +91,6 @@ arcgis/ImportLog
 
 # make sure the environment is not included
 env/
+
+# doc build directory
+docs/

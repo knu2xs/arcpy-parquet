@@ -1,10 +1,10 @@
 """
 Resources making data_dir import and export easier, and in some cases, *possible*, in an
-environment with ArcGIS Pro.
+environment with ArcGIS.
 
 .. note::
 
-    This module requires ``arcpy`` and ``pyarrow``. Both of these are included with the default
+    This module requires ``arcpy`` and ``pyarrow``. Both are included with the default
     installation of ArcGIS Pro or the ArcGIS Enterprise Application Server.
 
 """
@@ -289,9 +289,6 @@ def parquet_to_feature_class(
             the count of records with this parameter. If left blank, will import all records.
         logger: Optional logger for recording progress.
         build_spatial_index: Optional if desired to build the spatial index once inserting all the data.
-
-    Returns:
-        Path to output Feature Class.
     """
     # get a logger to report progress if one is not provided
     if logger is None:
@@ -500,14 +497,11 @@ def parquet_to_feature_class(
 
 def create_schema_file(template_feature_class_path: Path, output_schema_file: Path) -> Path:
     """
-    Create a JSON Schema file to use with ``parquet_to_feature_class``.
+    Create a CSV Schema file to use with ``parquet_to_feature_class``.
 
     Args:
         template_feature_class_path: Path to Feature Class with the schema to mimic.
         output_schema_file: Path where the CSV schema file will be stored.
-
-    Returns:
-        Path to CSV file created.
     """
     # read the fields from the feature class
     fld_lst = [fld for fld in arcpy.ListFields(str(template_feature_class_path))
