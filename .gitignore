@@ -54,6 +54,7 @@ htmlcov/
 # Sphinx documentation
 docsrc/_build/
 docsrc/build/
+docs/
 
 # PyBuilder
 target/
