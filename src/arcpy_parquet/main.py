@@ -76,8 +76,9 @@ def feature_class_to_parquet(
     Args:
         input_table: Path to feature class or table.
         output_parquet: Path to where the output Parquet file will be saved.
-        include_geometry: Whether to include the geometry.
-        geometry_format: If including the geometry, what format the geometry should be in.
+        include_geometry: Whether to include the geometry in the output Parquet dataset.
+        geometry_format: If including the geometry, what format the geometry should be in, either
+            ``XY``, ``WKT``, or ``WKB``. Default is ``WKB``.
         batch_size: Count of records per parquet "part" file.
 
     Returns:
@@ -277,18 +278,19 @@ def parquet_to_feature_class(
         parquet_path: The directory or Parquet part file to convert.
         output_feature_class: Where to save the new Feature Class.
         schema_file: CSV file with detailed schema properties.
-        geometry_type: "POINT", "POLYLINE", or "POLYGON" describing the geometry type. Default
-            is "POINT".
+        geometry_type: ``POINT``, ``POLYLINE``, or ``POLYGON`` describing the geometry type. Default
+            is ``POINT``.
         parquet_partitions: Partition name and values, if available, to select. For instance,
             if partitioned by country column using ISO2 identifiers, select Mexico using
-            "country=mx".
+            ``country=mx``.
         wkb_column: Column from parquet table containing the geometry encodced as WKB. Default
-            is "wkb".
-        spatial_reference: Spatial reference of input data_dir. Default is WGS84 (WKID: 4326).
-        sample_count: If only wanting to import enough data_dir to understand the schema, specify
+            is ``wkb``.
+        spatial_reference: Spatial reference of input data. Default is WGS84 (WKID: 4326).
+        sample_count: If only wanting to import enough data to understand the schema, specify
             the count of records with this parameter. If left blank, will import all records.
         logger: Optional logger for recording progress.
         build_spatial_index: Optional if desired to build the spatial index once inserting all the data.
+            Default is ``FALSE``.
     """
     # get a logger to report progress if one is not provided
     if logger is None:
@@ -384,7 +386,7 @@ def parquet_to_feature_class(
 
         # if the field name exists in the dictionary, peel off a single field's properties and add a field using them
         if nm in schema_dict.keys():
-            prop_dict = schema_dict.pop(nm)
+            prop_dict = schema_dict.get(nm)
             arcpy.management.AddField(in_table=str(output_feature_class), **prop_dict)
 
         # otherwise, add based on introspected properties
@@ -399,8 +401,8 @@ def parquet_to_feature_class(
             )
 
     # if any fields are defined in the schema file still left over, add them
-    for prop_dict in schema_dict.keys():
-        arcpy.management.AddField(in_table=str(output_feature_class), **prop_dict)
+    for nm in schema_dict.keys():
+        arcpy.management.AddField(in_table=str(output_feature_class), **schema_dict.get(nm))
 
     # interrogate the ACTUAL column names since, depending on the database, names can get truncated
     fc_fld_dict = {c.aliasName: c.name for c in arcpy.ListFields(str(output_feature_class))
