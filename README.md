@@ -1,12 +1,10 @@
-# arcpy-parquet
+# ArcPy-Parquet
 
-Tooling to import and export from and to Parquet.
+ArcPy-Parquet is a Python module and ArcGIS Pro Python Toolbox (`./arcgis/ArcPy-Parquet-Tools.pyt`) facilitating conversion between ArcGIS Feature Classes in a Geodatabase and Parquet datasets. The Python package can be used autonomously (without the ArcGIS Python Toolbox) for automated data export or ingestion tasks.
 
 ## BumpVersion Cliff Notes
 
 [Bump2Version](https://github.com/c4urself/bump2version) is preconfigured based on hints from [this article on Medium](https://williamhayes.medium.com/versioning-using-bumpversion-4d13c914e9b8).
-
-If you want to...
 
 - apply a patch, `bumpversion patch`
 - update version with no breaking changes (minor version update), `bumpversion minor`
