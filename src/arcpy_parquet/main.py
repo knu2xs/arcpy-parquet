@@ -1,18 +1,8 @@
-"""
-Resources making data_dir import and export easier, and in some cases, *possible*, in an
-environment with ArcGIS.
-
-.. note::
-
-    This module requires ``arcpy`` and ``pyarrow``. Both are included with the default
-    installation of ArcGIS Pro or the ArcGIS Enterprise Application Server.
-
-"""
 import json
 import logging
 import os
 from pathlib import Path
-from typing import List, Optional, Tuple, Union, Iterable
+from typing import List, Optional, Tuple, Union
 import uuid
 
 import arcpy
@@ -69,7 +59,7 @@ def feature_class_to_parquet(
         include_geometry: bool = True,
         geometry_format: str = 'WKB',
         batch_size: int = 300000
-):
+) -> Path:
     """
     Export a Feature Class to Parquet.
 
@@ -79,10 +69,7 @@ def feature_class_to_parquet(
         include_geometry: Whether to include the geometry in the output Parquet dataset.
         geometry_format: If including the geometry, what format the geometry should be in, either
             ``XY``, ``WKT``, or ``WKB``. Default is ``WKB``.
-        batch_size: Count of records per parquet "part" file.
-
-    Returns:
-        Path to exported data_dir.
+        batch_size: Count of records per parquet ``part-*.parquet`` file.
     """
     # downgrade path so arcpy can use strings
     fc_pth = str(input_table)
