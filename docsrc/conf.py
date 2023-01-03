@@ -31,7 +31,7 @@ copyright = '2022, Joel McCune'
 author = 'Joel McCune'
 
 # The full version, including alpha/beta/rc tags
-release = '0.0.0'
+release = '0.0.0-prod0'
 
 # -- Copying notebooks for inclusion -----------------------------------------
 prj_dir = os.path.abspath('../')
