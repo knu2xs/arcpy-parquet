@@ -69,7 +69,7 @@ def feature_class_to_parquet(
         include_geometry: Whether to include the geometry in the output Parquet dataset.
         geometry_format: If including the geometry, what format the geometry should be in, either
             ``XY``, ``WKT``, or ``WKB``. Default is ``WKB``.
-        batch_size: Count of records per parquet ``part-*.parquet`` file.
+        batch_size: Count of records per ``part-*.parquet`` file.
     """
     # downgrade path so arcpy can use strings
     fc_pth = str(input_table)
