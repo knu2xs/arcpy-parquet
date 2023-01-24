@@ -1,7 +1,6 @@
-import json
 import logging
-import os
 from pathlib import Path
+import time
 from typing import List, Optional, Tuple, Union
 import uuid
 
@@ -82,29 +81,36 @@ def feature_class_to_parquet(
     if not output_parquet.exists():
         output_parquet.mkdir(parents=True)
 
-    # describe the data_dir to access properties for validation
-    desc = arcpy.Describe(fc_pth)
+    # describe the data to access properties for validation
+    desc = arcpy.da.Describe(fc_pth)
 
     # fields to be excluded
     exclude_fld_typ = ['Raster']
     exclude_fld_lst = []
-    if desc.hasOID:
-        exclude_fld_lst = exclude_fld_lst + [desc.OIDFieldName]
+
+    if desc['hasOID']:
+        exclude_fld_lst.append(desc['OIDFieldName'])
+
+    for shp_fld_key in ['lengthFieldName', 'areaFieldName']:
+
+        shp_fld = desc.get(shp_fld_key)
+        if shp_fld is not None:
+            exclude_fld_lst.append(shp_fld)
 
     # get a list of input fields to use with the search cursor
-    sc_col_lst = [f.name for f in desc.fields if f.name not in exclude_fld_lst and f.type not in exclude_fld_typ]
+    sc_col_lst = [f.name for f in desc['fields'] if f.name not in exclude_fld_lst and f.type not in exclude_fld_typ]
 
     # iterate fields to create output schema, excluding geometry since handled explicitly later
     pa_fld_typ_xcld = exclude_fld_typ + ['Geometry']
-    pa_fld_lst = [f for f in desc.fields if f.name not in exclude_fld_lst and f.type not in pa_fld_typ_xcld]
-    pa_typ_lst = [(f.name, export_dtype_dict.get(f, pa.string())) for f in pa_fld_lst]
+    pa_fld_lst = [f for f in desc['fields'] if f.name not in exclude_fld_lst and f.type not in pa_fld_typ_xcld]
+    pa_typ_lst = [(f.name, export_dtype_dict.get(f.type, pa.string())) for f in pa_fld_lst]
     pq_schema = pa.schema(pa_typ_lst)
 
     # if the input has geometry (is a feature class)
-    if hasattr(desc, 'shapeFieldName') and include_geometry:
+    if desc.get('shapeFieldName') is not None and include_geometry:
 
         # get the name of the geometry column
-        geom_nm = desc.shapeFieldName
+        geom_nm = desc.get('shapeFieldName')
 
         # since the geometry must be specially formatted, it needs to first be removed from the list
         sc_col_lst.remove(geom_nm)
@@ -170,6 +176,7 @@ def feature_class_to_parquet(
 
             # if at a batch size (part) interval or end of dataset
             if (idx + 1) % batch_size == 0 or (idx + 1) == max_range:
+
                 # create a PyArrow table object instance from the accumulated dictionary
                 pa_tbl = pa.Table.from_pydict(pa_dict, pq_schema)
 
@@ -417,6 +424,9 @@ def parquet_to_feature_class(
         # flag for if at sample count and need to break out of loop
         at_sample_count = False
 
+        # variable to track start time
+        start_time = time.time()
+
         # iterate the parquet part files
         for part_file in pqt_prts:
 
@@ -462,7 +472,14 @@ def parquet_to_feature_class(
 
                 # provide messages every 10,000 features
                 if added_cnt % 10000 == 0:
-                    logger.info(f'Imported {added_cnt:,} rows...')
+
+                    # find the elapsed time
+                    elapsed_time = time.time() - start_time
+
+                    # calculate the rate per hour
+                    rate = round(added_cnt / elapsed_time * 3600)
+
+                    logger.info(f'Imported {added_cnt:,} rows at a rate of {rate:,} per hour...')
 
             # ensure next batch is not run if cancelled or only running a sample
             if arcpy.env.isCancelled or at_sample_count:
