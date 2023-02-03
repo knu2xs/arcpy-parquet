@@ -136,7 +136,7 @@ def feature_class_to_parquet(
     if hasattr(desc, 'shapeFieldName') and not include_geometry:
         sc_col_lst.remove(desc.shapeFieldName)
 
-    # get values from the data_dir to track progress
+    # get values from the data to track progress
     max_range = int(arcpy.management.GetCount(str(input_table))[0])
     rep_range = max(1, max_range // 100)
 
@@ -380,7 +380,7 @@ def parquet_to_feature_class(
 
         # if the field name exists in the dictionary, peel off a single field's properties and add a field using them
         if nm in schema_dict.keys():
-            prop_dict = schema_dict.get(nm)
+            prop_dict = schema_dict.pop(nm)
             arcpy.management.AddField(in_table=str(output_feature_class), **prop_dict)
 
         # otherwise, add based on introspected properties

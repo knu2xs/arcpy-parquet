@@ -29,3 +29,24 @@ def test_feature_class_to_parquet():
     out_pqt = arcpy_parquet.feature_class_to_parquet(test_fc, tmp_pqt)
 
     assert out_pqt.exists()
+
+
+def test_feature_class_to_parquet_countries():
+
+    countries_fc = r'D:\projects\ba-data-engineering\data\raw\MBR_Countries_World_raw.gdb\MBR_Countries_World_raw_1022'
+    out_pqt = r'D:\projects\ba-data-engineering\data\external\countries_mbr_raw_2023.parquet'
+
+    res = arcpy_parquet.feature_class_to_parquet(Path(countries_fc), Path(out_pqt))
+
+    assert res.exists()
+
+
+def test_parquet_to_feature_class_basemaps():
+    import arcpy
+    arcpy.env.overwriteOutput = True
+    in_pqt = Path(r'D:\projects\ba-data-engineering\data\processed\delivery\foursquare_basemaps.parquet')
+    out_fc = Path(r'D:\projects\ba-data-engineering\data\processed\delivery\foursquare_basemaps_devsummit.gdb\places')
+    schma_csv = Path(r'D:\projects\ba-data-engineering\data\processed\delivery\foursquare_basemaps_schema.csv')
+    res = arcpy_parquet.parquet_to_feature_class(in_pqt, output_feature_class=out_fc, schema_file=schma_csv,
+                                                 build_spatial_index=True)[0]
+    assert out_fc.exists()
