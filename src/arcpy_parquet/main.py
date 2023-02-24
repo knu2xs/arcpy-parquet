@@ -121,7 +121,7 @@ def feature_class_to_parquet(
             # add X and Y columns to search cursor list and the output schema
             for prt in ['X', 'Y']:
                 sc_col_lst.append(f'{geom_nm}@{prt}')
-                pq_schema.append(pa.field(f'geometry_{prt}', pa.float64()))
+                pq_schema = pq_schema.append(pa.field(f'geometry_{prt}', pa.float64()))
 
         # if working with any other output type, just use the specific output format
         else:
@@ -130,7 +130,7 @@ def feature_class_to_parquet(
             sc_col_lst.append(f'{geom_nm}@{geometry_format}')
 
             # add the geometry to the output schema
-            pq_schema.append(pa.field(f'{geometry_format.lower()}', pa.binary()))
+            pq_schema = pq_schema.append(pa.field(f'{geometry_format.lower()}', pa.binary()))
 
     # if the geometry is not desired in the output, remove it from the search cursor column list
     if hasattr(desc, 'shapeFieldName') and not include_geometry:

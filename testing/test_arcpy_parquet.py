@@ -8,6 +8,8 @@ import sys
 import tempfile
 
 import arcpy
+import pyarrow.parquet as pq
+
 
 # get paths to useful resources - notably where the src directory is
 self_pth = Path(__file__)
@@ -29,6 +31,9 @@ def test_feature_class_to_parquet():
     out_pqt = arcpy_parquet.feature_class_to_parquet(test_fc, tmp_pqt)
 
     assert out_pqt.exists()
+
+    pqt_ds = pq.ParquetDataset(tmp_pqt, use_legacy_dataset=False)
+    assert 'wkb' in pqt_ds.schema.names
 
 
 def test_feature_class_to_parquet_countries():
