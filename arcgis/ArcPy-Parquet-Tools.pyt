@@ -6,6 +6,7 @@ from typing import List
 import sys
 
 import arcpy
+import pyarrow.parquet as pq
 
 # import the local library, either if in system environment, or through relative path
 if importlib.util.find_spec("arcpy_parquet") is None:
@@ -28,7 +29,7 @@ class Toolbox(object):
     def __init__(self):
         """Define the toolbox (the name of the toolbox is the name of the .pyt file)."""
         self.label = "ArcPy-Parquet-Tools"
-        self.alias = "arcpy-parquet-tools"
+        self.alias = "arcpyParquetTools"
 
         # List of tool classes associated with this toolbox
         self.tools = [CreateSchemaFile, ParquetToFeatureClass, FeatureClassToParquet]
@@ -58,7 +59,19 @@ class FeatureClassToParquet(object):
             parameterType="Required"
         )
 
-        param_lst = [input_table, output_parquet]
+        geometry_format = arcpy.Parameter(
+            name="geometry_format",
+            displayName="Geometry Format",
+            direction="Input",
+            datatype="GPString",
+            category='Advanced',
+            parameterType="Required"
+        )
+        geometry_format.filter.type = "ValueList"
+        geometry_format.filter.list = ["WKB", "WKT", "XY"]
+        geometry_format.value = "WKB"
+
+        param_lst = [input_table, output_parquet, geometry_format]
 
         return param_lst
 
@@ -80,11 +93,14 @@ class FeatureClassToParquet(object):
         # provide output as actual path object
         out_pqt_pth = Path(parameters[1].valueAsText)
 
+        # get the literal value for the output format
+        geometry_format = parameters[2].valueAsText
+
         feature_class_to_parquet(
             input_table=in_tbl_pth,
             output_parquet=out_pqt_pth,
             include_geometry=True,
-            geometry_format='WKB',
+            geometry_format=geometry_format,
             batch_size=300000
         )
 
@@ -173,6 +189,17 @@ class ParquetToFeatureClass(object):
             parameterType='Required'
         )
 
+        geom_col = arcpy.Parameter(
+            name='geom_col',
+            displayName='Geometry Column',
+            datatype='GPString',
+            direction='Input',
+            category='Advanced',
+            parameterType='Required'
+        )
+        geom_col.filter.type = 'ValueList'
+        geom_col.value = 'wkb'
+
         build_idx = arcpy.Parameter(
             name='build_idx',
             displayName='Build Spatial Index',
@@ -214,7 +241,7 @@ class ParquetToFeatureClass(object):
         )
         schema_file_pth.filter.list = ['csv']
 
-        param_lst = [pqt_pth, pqt_prt_01, pqt_prt_02, pqt_prt_03, sptl_ref, geom_type, out_fc_pth, build_idx,
+        param_lst = [pqt_pth, pqt_prt_01, pqt_prt_02, pqt_prt_03, sptl_ref, out_fc_pth, geom_col, geom_type, build_idx,
                      smpl, smpl_cnt, schema_file_pth]
 
         return param_lst
@@ -228,7 +255,7 @@ class ParquetToFeatureClass(object):
         has been changed."""
 
         # unpack the parameters into understandable variable names
-        pqt_pth, pqt_prt_01, pqt_prt_02, pqt_prt_03, sptl_ref, geom_type, out_fc_pth, build_idx, smpl, smpl_cnt, schema_file_pth = parameters
+        pqt_pth, pqt_prt_01, pqt_prt_02, pqt_prt_03, sptl_ref, out_fc_pth, geom_col, geom_type, build_idx, smpl, smpl_cnt, schema_file_pth = parameters
 
         # pre-populate the output name
         if pqt_pth.altered and out_fc_pth.value is None:
@@ -281,6 +308,20 @@ class ParquetToFeatureClass(object):
         elif smpl.altered and smpl.value is False:
             smpl_cnt.enabled = False
 
+        # if an input parquet dataset is provided, read the columns to provide options for the advanced input
+        if pqt_pth.altered:
+
+            pqt_ds = pq.ParquetDataset(pqt_pth.valueAsText, use_legacy_dataset=False)
+
+            col_lst = pqt_ds.schema.names
+            geom_col.filter.list = col_lst
+
+            # set a default if wkb in input column name string
+            for col in col_lst:
+                if 'wkb' in col.lower():
+                    geom_col.value = col
+                    break
+
         return
 
     def updateMessages(self, parameters):
@@ -297,12 +338,13 @@ class ParquetToFeatureClass(object):
         pqt_prt_02 = parameters[2].valueAsText
         pqt_prt_03 = parameters[3].valueAsText
         sptl_ref = parameters[4].value
-        geom_type = parameters[5].valueAsText
-        out_fc_pth = parameters[6].valueAsText
-        build_idx = parameters[7].value
-        smpl = parameters[8].value
-        smpl_cnt = parameters[9].valueAsText
-        schema_file_pth = parameters[10].valueAsText
+        out_fc_pth = parameters[5].valueAsText
+        geom_col = parameters[6].valueAsText
+        geom_type = parameters[7].valueAsText
+        build_idx = parameters[8].value
+        smpl = parameters[9].value
+        smpl_cnt = parameters[10].valueAsText
+        schema_file_pth = parameters[11].valueAsText
 
         # pass the JSON path in as a Path object
         if schema_file_pth is not None:
@@ -321,7 +363,7 @@ class ParquetToFeatureClass(object):
         # execute the function
         parquet_to_feature_class(pqt_pth, output_feature_class=Path(out_fc_pth), schema_file=schema_file_pth,
                                  geometry_type=geom_type, parquet_partitions=partition_vals,
-                                 wkb_column='wkb', spatial_reference=sptl_ref, sample_count=smpl_cnt,
+                                 geometry_column=geom_col, spatial_reference=sptl_ref, sample_count=smpl_cnt,
                                  build_spatial_index=build_idx)
 
         return

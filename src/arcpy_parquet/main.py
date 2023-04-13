@@ -133,8 +133,8 @@ def feature_class_to_parquet(
             pq_schema = pq_schema.append(pa.field(f'{geometry_format.lower()}', pa.binary()))
 
     # if the geometry is not desired in the output, remove it from the search cursor column list
-    if hasattr(desc, 'shapeFieldName') and not include_geometry:
-        sc_col_lst.remove(desc.shapeFieldName)
+    if 'shapeFieldName' in desc.keys() and not include_geometry:
+        sc_col_lst.remove(desc['shapeFieldName'])
 
     # get values from the data to track progress
     max_range = int(arcpy.management.GetCount(str(input_table))[0])
@@ -142,7 +142,7 @@ def feature_class_to_parquet(
 
     # report progress
     features_tense = 'feature' if max_range == 1 else 'features'
-    arcpy.AddMessage(f'Starting export of {max_range} {features_tense}.')
+    arcpy.AddMessage(f'Starting export of {max_range:,} {features_tense}.')
     arcpy.SetProgressor('step', 'Exporting...', 0, max_range, rep_range)
 
     # turn off auto cancelling since handling in loop
@@ -255,7 +255,7 @@ def parquet_to_feature_class(
         schema_file: Path = None,
         geometry_type: str = 'POINT',
         parquet_partitions: Optional[List[str]] = None,
-        wkb_column: str = 'wkb',
+        geometry_column: str = 'wkb',
         spatial_reference: Union[arcpy.SpatialReference, str, int] = 4326,
         sample_count: Optional[int] = None,
         logger: Optional[logging.Logger] = None,
@@ -277,7 +277,7 @@ def parquet_to_feature_class(
         parquet_partitions: Partition name and values, if available, to select. For instance,
             if partitioned by country column using ISO2 identifiers, select Mexico using
             ``country=mx``.
-        wkb_column: Column from parquet table containing the geometry encodced as WKB. Default
+        geometry_column: Column from parquet table containing the geometry encoded as WKB. Default
             is ``wkb``.
         spatial_reference: Spatial reference of input data. Default is WGS84 (WKID: 4326).
         sample_count: If only wanting to import enough data to understand the schema, specify
@@ -338,17 +338,17 @@ def parquet_to_feature_class(
     pqt_ds = pq.ParquetDataset(parquet_path, use_legacy_dataset=False)
 
     # ensure the geometry_column exists in the input data_dir
-    assert wkb_column in pqt_ds.schema.names, 'The geometry_column does not appear to be in the input parquet columns.'
+    assert geometry_column in pqt_ds.schema.names, 'The geometry_column does not appear to be in the input parquet columns.'
 
     # create list of mostly literal names to provide as aliases
-    attr_alias_lst = [c for c in pqt_ds.schema.names if c != wkb_column]
+    attr_alias_lst = [c for c in pqt_ds.schema.names if c != geometry_column]
 
     # prepend any column names starting with a number with an 'c' and save as the field names
     attr_nm_lst = [f'c{c}' if c[0].isdigit() else c for c in attr_alias_lst]
 
     # get a list of the string column types from parquet, and use these to map to esri field types
     col_typ_lst = [str(c.type.value_type) if isinstance(c.type, pa.DictionaryType) else str(c.type) for c in
-                   pqt_ds.schema if c.name != wkb_column]
+                   pqt_ds.schema if c.name != geometry_column]
     fld_typ_lst = [import_dtype_dict[typ] for typ in col_typ_lst]
 
     # create the new feature class
@@ -404,7 +404,7 @@ def parquet_to_feature_class(
 
     # create the list of feature class columns for the insert cursor and for row lookup from parquet from pydict object
     insert_col_lst = list(fc_fld_dict.values()) + ['SHAPE@WKB']
-    pydict_col_lst = list(fc_fld_dict.keys()) + [wkb_column]
+    pydict_col_lst = list(fc_fld_dict.keys()) + [geometry_column]
 
     # this prevents pyarrow from getting hung up
     arcpy.env.autoCancelling = False
