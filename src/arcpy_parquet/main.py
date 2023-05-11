@@ -294,7 +294,7 @@ def parquet_to_feature_class(
     if isinstance(spatial_reference, (int, str)):
         spatial_reference = arcpy.SpatialReference(spatial_reference)
 
-    # if used as a tool in pro, let user know what is going on
+    # if used as a tool in pro, let user know what is going on...kind of
     arcpy.SetProgressorLabel('Warming up the Flux Capacitor...')
 
     # make sure paths...are paths
@@ -337,7 +337,7 @@ def parquet_to_feature_class(
     # create a PyArrow Table to read from
     pqt_ds = pq.ParquetDataset(parquet_path, use_legacy_dataset=False)
 
-    # ensure the geometry_column exists in the input data_dir
+    # ensure the geometry_column exists in the input data
     assert geometry_column in pqt_ds.schema.names, 'The geometry_column does not appear to be in the input parquet columns.'
 
     # create list of mostly literal names to provide as aliases
@@ -361,6 +361,8 @@ def parquet_to_feature_class(
         has_z=geom_dict[geometry_type][2]
     )
 
+    logger.info(f'Created feature class at {str(output_feature_class)}')
+
     # if a schema file is provided as part of input, load it to a dict using Pandas because it's easy
     if schema_file is None:
         schema_dict = {}
@@ -383,6 +385,11 @@ def parquet_to_feature_class(
             prop_dict = schema_dict.pop(nm)
             arcpy.management.AddField(in_table=str(output_feature_class), **prop_dict)
 
+            # for logging progress
+            log_dict = dict()
+            log_dict['in_table'] = str(output_feature_class)
+            log_dict = log_dict + prop_dict
+
         # otherwise, add based on introspected properties
         else:
             arcpy.management.AddField(
@@ -394,9 +401,28 @@ def parquet_to_feature_class(
                 field_is_nullable='NULLABLE'
             )
 
+            # for logging progress
+            log_dict = dict(
+                in_table=str(output_feature_class),
+                field_name=nm,
+                field_type=typ,
+                field_length=512,
+                field_alias=alias,
+                field_is_nullable='NULLABLE'
+            )
+
+        # log progress
+        logger.info(f'Field added to Feature Class {log_dict}')
+
     # if any fields are defined in the schema file still left over, add them
     for nm in schema_dict.keys():
         arcpy.management.AddField(in_table=str(output_feature_class), **schema_dict.get(nm))
+
+        # log remaining results
+        log_dict = dict()
+        log_dict['in_table'] = str(output_feature_class)
+        log_dict = log_dict + schema_dict
+        logger.info(f'Field added from schema file, but not detected in input data {log_dict}')
 
     # interrogate the ACTUAL column names since, depending on the database, names can get truncated
     fc_fld_dict = {c.aliasName: c.name for c in arcpy.ListFields(str(output_feature_class))
