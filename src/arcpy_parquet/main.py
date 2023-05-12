@@ -388,7 +388,7 @@ def parquet_to_feature_class(
             # for logging progress
             log_dict = dict()
             log_dict['in_table'] = str(output_feature_class)
-            log_dict = log_dict + prop_dict
+            log_dict = {**log_dict, **prop_dict}
 
         # otherwise, add based on introspected properties
         else:
@@ -421,7 +421,7 @@ def parquet_to_feature_class(
         # log remaining results
         log_dict = dict()
         log_dict['in_table'] = str(output_feature_class)
-        log_dict = log_dict + schema_dict
+        log_dict = {**log_dict, **schema_dict}
         logger.info(f'Field added from schema file, but not detected in input data {log_dict}')
 
     # interrogate the ACTUAL column names since, depending on the database, names can get truncated
