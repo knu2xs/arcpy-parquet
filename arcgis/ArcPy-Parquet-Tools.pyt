@@ -322,6 +322,25 @@ class ParquetToFeatureClass(object):
                     geom_col.value = col
                     break
 
+        # if following convention with schema in a nearby directory, when parquet path is provided, search for schema
+        if pqt_pth.altered:
+
+            # get the common parent directory for the parquet dataset
+            ds_pth = Path(pqt_pth.valueAsText).parent
+
+            # look to see if the schema has been included
+            schm_lst = list(ds_pth.glob('**/schema'))
+            if len(schm_lst):
+                schm_dir_pth = schm_lst[0]
+
+                # pull out the path file if it can be found
+                csv_pth_lst = list(schm_dir_pth.glob('**/part*.csv'))
+                if len(csv_pth_lst):
+                    csv_pth = csv_pth_lst[0]
+
+                    # populate the schema file path so don't have to hunt for it if using the convention
+                    schema_file_pth.value = str(csv_pth)
+
         return
 
     def updateMessages(self, parameters):

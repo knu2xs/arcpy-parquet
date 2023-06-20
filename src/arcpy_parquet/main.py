@@ -351,10 +351,14 @@ def parquet_to_feature_class(
                    pqt_ds.schema if c.name != geometry_column]
     fld_typ_lst = [import_dtype_dict[typ] for typ in col_typ_lst]
 
+    # check for really strange and uncaught error in naming
+    if output_feature_class.name.lower().startswith('delta'):
+        raise ValueError('Feature Class name cannot start with "delta".')
+
     # create the new feature class
     arcpy.management.CreateFeatureclass(
         out_path=str(output_feature_class.parent),
-        out_name=str(output_feature_class.name),
+        out_name=output_feature_class.name,
         geometry_type=geom_dict[geometry_type][0],
         spatial_reference=spatial_reference,
         has_m=geom_dict[geometry_type][1],
