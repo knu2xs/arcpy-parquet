@@ -208,7 +208,7 @@ class ParquetToFeatureClass(object):
             category='Advanced',
             parameterType='Required'
         )
-        build_idx.value = False
+        build_idx.value = True
 
         smpl = arcpy.Parameter(
             name='smpl',
