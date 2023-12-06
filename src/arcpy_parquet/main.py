@@ -445,6 +445,9 @@ def parquet_to_feature_class(
     # variable to track completed count
     added_cnt = 0
 
+    # variable to track fail count
+    fail_cnt = 0
+
     # create a cursor for inserting rows
     with arcpy.da.InsertCursor(str(output_feature_class), insert_col_lst) as insert_cursor:
 
@@ -469,24 +472,36 @@ def parquet_to_feature_class(
             # for every row index in the number of rows
             for pqt_idx in range(pa_tbl.num_rows):
 
-                # start creating a dict of single key partition_column_list pairs for this row of data_dir
-                row_pydict = {k: v[pqt_idx] for k, v in pqt_pydict.items()}
+                # try to add the row
+                try:
 
-                # populate the row dictionary with values from the partition dict
-                row_dict = {k: row_pydict.get(k) for k in pydict_col_lst}
+                    # start creating a dict of single key partition_column_list pairs for this row of data_dir
+                    row_pydict = {k: v[pqt_idx] for k, v in pqt_pydict.items()}
 
-                # fill any partition values
-                for p_key in partition_values_dict.keys():
-                    row_dict[p_key] = partition_values_dict[p_key]
+                    # populate the row dictionary with values from the partition dict
+                    row_dict = {k: row_pydict.get(k) for k in pydict_col_lst}
 
-                # create a row object by plucking out the values from the row dictionary
-                row = tuple(row_dict.values())
+                    # fill any partition values
+                    for p_key in partition_values_dict.keys():
+                        row_dict[p_key] = partition_values_dict[p_key]
 
-                # insert the row
-                insert_cursor.insertRow(row)
+                    # create a row object by plucking out the values from the row dictionary
+                    row = tuple(row_dict.values())
 
-                # update the completed count
-                added_cnt += 1
+                    # insert the row
+                    insert_cursor.insertRow(row)
+
+                    # update the completed count
+                    added_cnt += 1
+
+                # if cannot add the row
+                except Exception as e:
+
+                    # update the fail count
+                    fail_cnt += 1
+
+                    # make sure the reason is tracked
+                    logger.warning(f'Could not import row.\n\nContents:{row}\n\nMessage: {e}')
 
                 # check of at sample count
                 if added_cnt == sample_count:
@@ -515,11 +530,15 @@ def parquet_to_feature_class(
             if arcpy.env.isCancelled or at_sample_count:
                 break
 
-    # declare success
+    # declare success, and track failure if necessary
     success_msg = f'Successfully imported {added_cnt:,} rows.'
     arcpy.SetProgressorLabel(success_msg)
     arcpy.ResetProgressor()
     logger.info(success_msg)
+
+    if fail_cnt > 0:
+        fail_msg = f'Failure count: {fail_cnt:,}'
+        logger.warning(fail_msg)
 
     # build spatial index if requested
     if build_spatial_index:
