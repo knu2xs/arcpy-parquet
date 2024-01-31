@@ -28,6 +28,7 @@ geom_dict = {
     "MULTIPOINT Z": ("MULTIPOINT", "DISABLED", "ENABLED")
 }
 import_dtype_dict = {
+    "int8": "INTEGER",
     "int16": "INTEGER",
     "int32": "INTEGER",
     "int64": "LONG",
