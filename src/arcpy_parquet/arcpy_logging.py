@@ -85,14 +85,14 @@ class ArcpyHandler(logging.Handler):
 
 # setup logging
 def get_logger(
-        logger_name: Optional[str] = 'arcpy-logger',
+        logger_name: Optional[str] = None,
         log_level: Optional[Union[str, int]] = 'INFO',
-        logfile_pth: Union[Path, str] = None, propagate: bool = False
+        logfile_pth: Union[Path, str] = None
 ) -> logging.Logger:
     """
     Get Python :class:`Logger<logging.Logger>` configured to provide stream, file or, if available, ArcPy output.
     The way the method is set up, logging will be routed through ArcPy messaging using :class:`ArcpyHandler` if
-    ArcPy is available. If ArcPy is *not* available, messages will be sent to the console using a
+    ArcPy is available. Messages will always be sent to the console using a
     :class:`StreamHandler<logging.StreamHandler>`. Next, if the ``logfile_path`` is provided, log messages will also
     be written to the provided path to a logfile using a :class:`FileHandler<logging.FileHandler>`.
 
@@ -101,7 +101,7 @@ def get_logger(
     * ``DEBUG`` - Detailed information, typically of interest only when diagnosing problems.
     * ``INFO`` - Confirmation that things are working as expected.
     * ``WARNING`` or ``WARN`` -  An indication that something unexpected happened, or indicative of some problem in the
-      near future (e.g. ‘disk space low’). The software is still working as expected.
+      near future (e.g. ``disk space low``). The software is still working as expected.
     * ``ERROR`` - Due to a more serious problem, the software has not been able to perform some function.
     * ``CRITICAL`` - A serious error, indicating that the program itself may be unable to continue running.
 
@@ -138,28 +138,24 @@ def get_logger(
     # get a logger object instance
     logger = logging.getLogger(logger_name)
 
-    # set propagation
-    logger.propagate = propagate
-
     # set logging level
     if isinstance(log_level, str):
         log_level = getattr(logging, log_level)
     logger.setLevel(log_level)
 
     # configure formatting
-    log_frmt = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    log_frmt = logging.Formatter('%(asctime)s | %(levelname)s | %(message)s')
+
+    # create handler to console
+    ch = logging.StreamHandler()
+    ch.setFormatter(log_frmt)
+    logger.addHandler(ch)
 
     # if in an environment with ArcPy, add handler to bubble logging up to ArcGIS through ArcPy
     if has_arcpy:
         ah = ArcpyHandler()
         ah.setFormatter(log_frmt)
         logger.addHandler(ah)
-
-    # create handler to console if arcpy is not providing status
-    else:
-        ch = logging.StreamHandler()
-        ch.setFormatter(log_frmt)
-        logger.addHandler(ch)
 
     # if a path for the logfile is provided, log results to the file
     if logfile_pth is not None:
@@ -172,9 +168,6 @@ def get_logger(
         fh = logging.FileHandler(str(logfile_pth))
         fh.setFormatter(log_frmt)
         logger.addHandler(fh)
-
-    # keep logging from bubbling up - keep messages just in these handlers
-    logger.propagate = False
 
     return logger
 

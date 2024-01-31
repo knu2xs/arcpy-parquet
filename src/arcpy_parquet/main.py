@@ -259,8 +259,8 @@ def parquet_to_feature_class(
         geometry_column: str = 'wkb',
         spatial_reference: Union[arcpy.SpatialReference, str, int] = 4326,
         sample_count: Optional[int] = None,
-        logger: Optional[logging.Logger] = None,
-        build_spatial_index: bool = False
+        build_spatial_index: bool = False,
+        compact: bool = True,
 ) -> Path:
     """
     Convert a *properly formatted* Parquet source into a Feature Class in a Geodatabase.
@@ -285,12 +285,9 @@ def parquet_to_feature_class(
             the count of records with this parameter. If left blank, will import all records.
         logger: Optional logger for recording progress.
         build_spatial_index: Optional if desired to build the spatial index once inserting all the data.
-            Default is ``FALSE``.
+            Default is ``False``.
+        compact: If the File Geodatabase should be compacted following import. Default is ``True``.
     """
-    # get a logger to report progress if one is not provided
-    if logger is None:
-        logger = get_logger('parquet_to_feature_class')
-
     # convert integer to Spatial Reference
     if isinstance(spatial_reference, (int, str)):
         spatial_reference = arcpy.SpatialReference(spatial_reference)
@@ -366,7 +363,7 @@ def parquet_to_feature_class(
         has_z=geom_dict[geometry_type][2]
     )
 
-    logger.info(f'Created feature class at {str(output_feature_class)}')
+    logging.info(f'Created feature class at {str(output_feature_class)}')
 
     # if a schema file is provided as part of input, load it to a dict using Pandas because it's easy
     if schema_file is None:
@@ -417,7 +414,7 @@ def parquet_to_feature_class(
             )
 
         # log progress
-        logger.info(f'Field added to Feature Class {log_dict}')
+        logging.info(f'Field added to Feature Class {log_dict}')
 
     # if any fields are defined in the schema file still left over, add them
     for nm in schema_dict.keys():
@@ -427,7 +424,7 @@ def parquet_to_feature_class(
         log_dict = dict()
         log_dict['in_table'] = str(output_feature_class)
         log_dict = {**log_dict, **schema_dict}
-        logger.info(f'Field added from schema file, but not detected in input data {log_dict}')
+        logging.info(f'Field added from schema file, but not detected in input data {log_dict}')
 
     # interrogate the ACTUAL column names since, depending on the database, names can get truncated
     fc_fld_dict = {c.aliasName: c.name for c in arcpy.ListFields(str(output_feature_class))
@@ -445,6 +442,9 @@ def parquet_to_feature_class(
 
     # variable to track completed count
     added_cnt = 0
+
+    # variable to track fail count
+    fail_cnt = 0
 
     # create a cursor for inserting rows
     with arcpy.da.InsertCursor(str(output_feature_class), insert_col_lst) as insert_cursor:
@@ -470,24 +470,36 @@ def parquet_to_feature_class(
             # for every row index in the number of rows
             for pqt_idx in range(pa_tbl.num_rows):
 
-                # start creating a dict of single key partition_column_list pairs for this row of data_dir
-                row_pydict = {k: v[pqt_idx] for k, v in pqt_pydict.items()}
+                # try to add the row
+                try:
 
-                # populate the row dictionary with values from the partition dict
-                row_dict = {k: row_pydict.get(k) for k in pydict_col_lst}
+                    # start creating a dict of single key partition_column_list pairs for this row of data_dir
+                    row_pydict = {k: v[pqt_idx] for k, v in pqt_pydict.items()}
 
-                # fill any partition values
-                for p_key in partition_values_dict.keys():
-                    row_dict[p_key] = partition_values_dict[p_key]
+                    # populate the row dictionary with values from the partition dict
+                    row_dict = {k: row_pydict.get(k) for k in pydict_col_lst}
 
-                # create a row object by plucking out the values from the row dictionary
-                row = tuple(row_dict.values())
+                    # fill any partition values
+                    for p_key in partition_values_dict.keys():
+                        row_dict[p_key] = partition_values_dict[p_key]
 
-                # insert the row
-                insert_cursor.insertRow(row)
+                    # create a row object by plucking out the values from the row dictionary
+                    row = tuple(row_dict.values())
 
-                # update the completed count
-                added_cnt += 1
+                    # insert the row
+                    insert_cursor.insertRow(row)
+
+                    # update the completed count
+                    added_cnt += 1
+
+                # if cannot add the row
+                except Exception as e:
+
+                    # update the fail count
+                    fail_cnt += 1
+
+                    # make sure the reason is tracked
+                    logging.warning(f'Could not import row.\n\nContents:{row}\n\nMessage: {e}')
 
                 # check of at sample count
                 if added_cnt == sample_count:
@@ -510,24 +522,35 @@ def parquet_to_feature_class(
                     # calculate the rate per hour
                     rate = round(added_cnt / elapsed_time * 3600)
 
-                    logger.info(f'Imported {added_cnt:,} rows at a rate of {rate:,} per hour...')
+                    logging.info(f'Imported {added_cnt:,} rows at a rate of {rate:,} per hour...')
 
             # ensure next batch is not run if cancelled or only running a sample
             if arcpy.env.isCancelled or at_sample_count:
                 break
 
-    # declare success
+    # declare success, and track failure if necessary
     success_msg = f'Successfully imported {added_cnt:,} rows.'
     arcpy.SetProgressorLabel(success_msg)
     arcpy.ResetProgressor()
-    logger.info(success_msg)
+    logging.info(success_msg)
+
+    if fail_cnt > 0:
+        fail_msg = f'Failure count: {fail_cnt:,}'
+        logging.warning(fail_msg)
+
+    # if compacting, do it
+    if compact:
+
+        arcpy.SetProgressorLabel('Compacting data.')
+        arcpy.management.Compact(str(output_feature_class.parent))
+        logging.info('Successfully compacted data.')
 
     # build spatial index if requested
     if build_spatial_index:
 
         arcpy.SetProgressorLabel('Building spatial index.')
         arcpy.management.AddSpatialIndex(str(output_feature_class))
-        logger.info('Completed building spatial index.')
+        logging.info('Completed building spatial index.')
 
     return output_feature_class
 
