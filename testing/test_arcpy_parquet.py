@@ -97,3 +97,4 @@ def test_parquet_to_feature_class_coordinates(tmp_gdb):
     res = arcpy_parquet.parquet_to_feature_class(
         in_pqt, out_fc, geometry_type="COORDINATES"
     )
+    assert arcpy.Exists(str(out_fc))
