@@ -96,12 +96,12 @@ def test_parquet_to_feature_class_foursquare_melbourne():
 
     arcpy.env.overwriteOutput = True
     in_pqt = Path(
-        r"D:\projects\foursquare-melbourne202312\data\raw\foursquare_vic_extract_20240205"
+        r"D:\projects\foursquare-melbourne202312\data\raw\foursquare_vic_extract_20240205\parquet"
     )
     out_fc = Path(
         r"D:\projects\foursquare-melbourne202312\data\interim\interim.gdb\foursquare_vic_extract_20240205"
     )
-    schma_csv = r"D:\projects\foursquare-melbourne202312\data\raw\foursquare_vic_extract_20240205\schema\part-00000-4df505ec-b149-497a-9208-e1842caa8663-c000.csv"
+    schma_csv = [f for f in (in_pqt.parent / "schema").glob("*.csv")][0]
     res = arcpy_parquet.parquet_to_feature_class(
         in_pqt,
         output_feature_class=out_fc,
@@ -110,3 +110,4 @@ def test_parquet_to_feature_class_foursquare_melbourne():
         build_spatial_index=True,
     )
     assert arcpy.Exists(str(out_fc))
+    assert int(arcpy.management.GetCount(str(out_fc))[0]) > 0
