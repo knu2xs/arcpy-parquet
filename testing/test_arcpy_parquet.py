@@ -91,6 +91,18 @@ def test_parquet_to_feature_class_h3():
     assert arcpy.Exists(str(out_fc))
 
 
+def test_parquet_to_feature_class_coordinates(tmp_gdb):
+    in_pqt = Path(r"D:\projects\foursquare-processing\data\sample\coordinate_data")
+    out_fc = tmp_gdb / "test_coordinates"
+    res = arcpy_parquet.parquet_to_feature_class(
+        in_pqt,
+        out_fc,
+        geometry_type="COORDINATES",
+        geometry_column=["longitude", "latitude"],
+    )
+    assert arcpy.Exists(str(out_fc))
+
+
 def test_parquet_to_feature_class_foursquare_melbourne():
     import arcpy
 
