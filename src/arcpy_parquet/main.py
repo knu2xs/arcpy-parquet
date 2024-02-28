@@ -322,7 +322,13 @@ def parquet_to_feature_class(
     )
 
     # ensure will not encounter unexpected results based on incompatible input parameter or parameter combinations
-    if parquet_path.is_dir():
+    if not parquet_path.exists():
+        raise ValueError(
+            f"Cannot locate the input path {parquet_path}. Please double check to ensure the path is "
+            f"correct and reachable."
+        )
+
+    elif parquet_path.is_dir():
 
         # get all the part files to start with
         pqt_prts = [prt for prt in parquet_path.rglob("part-*.parquet")]
@@ -382,13 +388,15 @@ def parquet_to_feature_class(
             )
 
         # get a list of the string column types and field aliases from parquet
-        col_typ_lst, attr_alias_lst = [
-            (str(c.type.value_type), c.name)
-            if isinstance(c.type, pa.DictionaryType)
-            else str(c.type)
-            for c in pqt_ds.schema
-            if c.name not in geometry_column
-        ]
+        col_typ_lst, attr_alias_lst = zip(
+            *[
+                (str(c.type.value_type), c.name)
+                if isinstance(c.type, pa.DictionaryType)
+                else (str(c.type), c.name)
+                for c in pqt_ds.schema
+                if c.name not in geometry_column
+            ]
+        )
 
     else:
 
@@ -512,7 +520,11 @@ def parquet_to_feature_class(
 
     # create the list of feature class columns for the insert cursor and for row lookup from parquet from pydict object
     insert_col_lst = list(fc_fld_dict.values()) + [insert_geom_typ]
-    pydict_col_lst = list(fc_fld_dict.keys()) + [geometry_column]
+
+    if geometry_type == "COORDINATES":
+        pydict_col_lst = list(fc_fld_dict.keys())
+    else:
+        pydict_col_lst = list(fc_fld_dict.keys()) + [geometry_column]
 
     # this prevents pyarrow from getting hung up
     arcpy.env.autoCancelling = False
@@ -567,10 +579,10 @@ def parquet_to_feature_class(
 
                     # if the geometry is being generated from coordinate columns, create the coordinate tuple
                     if geometry_type == "COORDINATES":
-                        row_dict[insert_geom_typ] = [
-                            partition_values_dict[geometry_column[0]],
-                            partition_values_dict[geometry_column[1]],
-                        ]
+                        row_dict[insert_geom_typ] = (
+                            row_pydict[geometry_column[0]],
+                            row_pydict[geometry_column[1]],
+                        )
 
                     # create a row object by plucking out the values from the row dictionary
                     row = tuple(row_dict.values())
