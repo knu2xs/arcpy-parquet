@@ -321,8 +321,11 @@ class ParquetToFeatureClass(object):
             p_pth = Path(pqt_pth.valueAsText)
 
             # ensure somewhere under the top level directories, the actual parquet part files are found
-            part_lst = [itm for itm in p_pth.rglob("part-*")]
-            if len(part_lst) == 0:
+            has_part_file = False
+            for _ in p_pth.rglob("part-*.parquet"):
+                has_part_file = True
+                break
+            if not has_part_file:
                 pqt_pth.setErrorMessage('Cannot locate parquet "part" files.')
 
             # get a list of any level one partitions
