@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-import importlib
+import importlib.util
 import json
 from pathlib import Path
 from typing import List
@@ -25,6 +25,10 @@ from arcpy_parquet import (
     parquet_to_feature_class,
     feature_class_to_parquet,
 )
+from arcpy_parquet.utils.pyt_utils import deactivate_parameter
+
+# add flag to detect if h3 available
+has_h3 = False if importlib.util.find_spec("h3") is None else True
 
 
 class Toolbox(object):
@@ -181,8 +185,13 @@ class ParquetToFeatureClass(object):
             datatype="GPString",
             parameterType="Required",
         )
+
         geom_type.filter.type = "ValueList"
-        geom_type.filter.list = ["POINT", "POLYLINE", "POLYGON", "COORDINATES"]
+        fltr_lst = ["POINT", "POLYLINE", "POLYGON", "COORDINATES"]
+        if has_h3:
+            fltr_lst.append("H3")
+        geom_type.filter.list = fltr_lst
+
         geom_type.value = "COORDINATES"
 
         x_col = arcpy.Parameter(
@@ -190,18 +199,30 @@ class ParquetToFeatureClass(object):
             displayName="Longitude (X) Column",
             datatype="GPString",
             direction="Input",
-            parameterType="Required",
+            parameterType="Optional",
             enabled=True,
         )
+        x_col.filter.type = "ValueList"
 
         y_col = arcpy.Parameter(
             name="y_col",
             displayName="Latitude (Y) Column",
             datatype="GPString",
             direction="Input",
-            parameterType="Required",
+            parameterType="Optional",
             enabled=True,
         )
+        y_col.filter.type = "ValueList"
+
+        h3_col = arcpy.Parameter(
+            name="h3_col",
+            displayName="H3 Index Column",
+            datatype="GPString",
+            direction="Input",
+            parameterType="Optional",
+            enabled=False,
+        )
+        h3_col.filter.type = "ValueList"
 
         out_fc_pth = arcpy.Parameter(
             name="out_fc_pth",
@@ -221,7 +242,6 @@ class ParquetToFeatureClass(object):
             enabled=False,
         )
         geom_col.filter.type = "ValueList"
-        geom_col.value = "wkb"
 
         build_idx = arcpy.Parameter(
             name="build_idx",
@@ -239,7 +259,7 @@ class ParquetToFeatureClass(object):
             datatype="GPBoolean",
             direction="Input",
             category="Advanced",
-            parameterType="Required",
+            parameterType="Optional",
         )
         smpl.value = False
 
@@ -249,7 +269,7 @@ class ParquetToFeatureClass(object):
             datatype="GPLong",
             direction="Input",
             category="Advanced",
-            parameterType="Required",
+            parameterType="Optional",
             enabled=False,
         )
         smpl_cnt.value = 100
@@ -275,6 +295,7 @@ class ParquetToFeatureClass(object):
             geom_type,
             x_col,
             y_col,
+            h3_col,
             build_idx,
             smpl,
             smpl_cnt,
@@ -303,6 +324,7 @@ class ParquetToFeatureClass(object):
             geom_type,
             x_col,
             y_col,
+            h3_col,
             build_idx,
             smpl,
             smpl_cnt,
@@ -356,14 +378,21 @@ class ParquetToFeatureClass(object):
                 pqt_prt_03.enabled = True
 
         # if a sample is desired, add ability to specify the sample count
-        if smpl.value is True and smpl_cnt.value < 1:
+        if smpl.value is True and smpl_cnt.value is None:
+            smpl_cnt.setErrorMessage("Sample count must be greater than zero.")
+        elif smpl.value is True and smpl_cnt.value < 1:
             smpl_cnt.setErrorMessage("Sample count must be greater than zero.")
         elif smpl.altered and smpl.value is True:
             smpl_cnt.enabled = True
+        elif smpl.altered and smpl.value is False and smpl_cnt.value is None:
+            smpl_cnt.value = 100
         elif smpl.altered and smpl.value is False and smpl_cnt.value < 1:
             smpl_cnt.value = 100
         elif smpl.altered and smpl.value is False:
             smpl_cnt.enabled = False
+
+        # variables to hold defaults
+        geom_col_value, x_col_value, y_col_value, h3_col_value = None, None, None, None
 
         # if an input parquet dataset is provided,
         if pqt_pth.altered:
@@ -372,44 +401,69 @@ class ParquetToFeatureClass(object):
             pqt_ds = pq.ParquetDataset(pqt_pth.valueAsText, use_legacy_dataset=False)
             col_lst = pqt_ds.schema.names
 
-            # populate column lists for columns
+            # populate column lists for column parameter inputs
             geom_col.filter.list = col_lst
             x_col.filter.list = col_lst
             y_col.filter.list = col_lst
+            h3_col.filter.list = col_lst
 
             # search for some logical defaults
             for col in col_lst:
 
                 # provide default for finding well known binary
                 if "wkb" in col.lower():
-                    geom_col.value = col
+                    geom_col_value = col
 
                 # set a default if wkb in input column name string
                 if col.lower() in ["x", "lon", "longitude"]:
-                    x_col.value = col
+                    x_col_value = col
 
                 # set a default if y, lat, or latitude
                 if col.lower() in ["y", "lat", "latitude"]:
-                    y_col.value = col
+                    y_col_value = col
 
-        if geom_type.altered:
+                # set default for h3 if something starts with h3
+                if col.lower().startswith("h3"):
+                    h3_col_value = col
+
+        # once there is something to work with, ensure correct required columns are present
+        if geom_type.altered or pqt_pth.altered:
 
             # if geometry type modified to coordinates, update input geometry columns for changes
             if geom_type.value == "COORDINATES":
+
                 x_col.parameterType = "Required"
                 x_col.enabled = True
+                if x_col.value is None:
+                    x_col.value = x_col_value
+
                 y_col.parameterType = "Required"
                 y_col.enabled = True
-                geom_col.parameterType = "Optional"
-                geom_col.enabled = False
-                geom_col.value = None
+                if y_col.value is None:
+                    y_col.value = y_col_value
+
+                for param in (geom_col, h3_col):
+                    deactivate_parameter(param)
+
+            elif geom_type.value == "H3":
+
+                h3_col.parameterType = "Required"
+                h3_col.enabled = True
+                if h3_col.value is None:
+                    h3_col.value = h3_col_value
+
+                for param in (geom_col, x_col, y_col):
+                    deactivate_parameter(param)
+
             else:
+
                 geom_col.parameterType = "Required"
                 geom_col.enabled = True
-                x_col.parameterType = "Optional"
-                x_col.enabled = False
-                y_col.parameterType = "Optional"
-                y_col.enabled = False
+                if geom_col.value is None:
+                    geom_col.value = geom_col_value
+
+                for param in (x_col, y_col, h3_col):
+                    deactivate_parameter(param)
 
         # if following convention with schema in a nearby directory, when parquet path is provided, search for schema
         if pqt_pth.altered:
@@ -451,10 +505,11 @@ class ParquetToFeatureClass(object):
         geom_type = parameters[7].valueAsText
         x_col = parameters[8].valueAsText
         y_col = parameters[9].valueAsText
-        build_idx = parameters[10].value
-        smpl = parameters[11].value
-        smpl_cnt = parameters[12].valueAsText
-        schema_file_pth = parameters[13].valueAsText
+        h3_col = parameters[10].valueAsText
+        build_idx = parameters[11].value
+        smpl = parameters[12].value
+        smpl_cnt = parameters[13].valueAsText
+        schema_file_pth = parameters[14].valueAsText
 
         # pass the JSON path in as a Path object
         if schema_file_pth is not None:
@@ -467,6 +522,8 @@ class ParquetToFeatureClass(object):
         # handle option for coordinates
         if geom_type == "COORDINATES":
             geometry_column = [x_col, y_col]
+        elif geom_type == "H3":
+            geometry_column = h3_col
         else:
             geometry_column = geom_col
 

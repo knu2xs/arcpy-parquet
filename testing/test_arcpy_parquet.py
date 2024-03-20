@@ -70,27 +70,6 @@ def test_parquet_to_feature_class_basemaps():
     assert out_fc.exists()
 
 
-def test_parquet_to_feature_class_h3():
-    import arcpy
-
-    arcpy.env.overwriteOutput = True
-    in_pqt = Path(
-        r"D:\projects\foursquare-processing\data\raw\foursquare_deltas\esri_h3_05\parquet"
-    )
-    out_fc = Path(
-        r"D:\projects\foursquare-processing\data\processed\processed.gdb\adu_delta_h3_05"
-    )
-    schma_csv = r"D:\projects\foursquare-processing\data\raw\foursquare_deltas\esri_h3_05\schema\part-00000-0445cd8d-f968-460a-9b4c-d41e66bb1de1-c000.csv"
-    res = arcpy_parquet.parquet_to_feature_class(
-        in_pqt,
-        output_feature_class=out_fc,
-        schema_file=schma_csv,
-        geometry_type="POLYGON",
-        build_spatial_index=True,
-    )
-    assert arcpy.Exists(str(out_fc))
-
-
 def test_parquet_to_feature_class_coordinates(tmp_gdb):
     in_pqt = Path(r"D:\projects\foursquare-processing\data\sample\coordinate_data")
     out_fc = tmp_gdb / "test_coordinates"
@@ -101,6 +80,7 @@ def test_parquet_to_feature_class_coordinates(tmp_gdb):
         geometry_column=["longitude", "latitude"],
     )
     assert arcpy.Exists(str(out_fc))
+    assert int(arcpy.management.GetCount(str(out_fc))[0]) > 0
 
 
 def test_parquet_to_feature_class_foursquare_melbourne():
@@ -120,6 +100,37 @@ def test_parquet_to_feature_class_foursquare_melbourne():
         schema_file=schma_csv,
         geometry_type="POINT",
         build_spatial_index=True,
+    )
+    assert arcpy.Exists(str(out_fc))
+    assert int(arcpy.management.GetCount(str(out_fc))[0]) > 0
+
+
+def test_parquet_to_feature_class_h3(tmp_gdb):
+    in_pqt = Path(r"D:\projects\density-anomalies\data\raw\anomaly\popularity\parquet")
+    out_fc = tmp_gdb / "popularity_anomalies"
+    res = arcpy_parquet.parquet_to_feature_class(
+        in_pqt,
+        output_feature_class=out_fc,
+        geometry_type="H3",
+        geometry_column="esri_h3_09",
+        build_spatial_index=True,
+    )
+    assert arcpy.Exists(str(out_fc))
+    assert int(arcpy.management.GetCount(str(out_fc))[0]) > 0
+
+
+def test_parquet_to_feature_class_coordinates_popularity_poi():
+    in_pqt = Path(
+        r"D:\projects\density-anomalies\data\raw\anomaly\popularity_retail_poi\parquet"
+    )
+    out_fc = Path(
+        r"D:\projects\density-anomalies\data\interim\interim.gdb\anomaly_popularity_retail"
+    )
+    res = arcpy_parquet.parquet_to_feature_class(
+        in_pqt,
+        out_fc,
+        geometry_type="COORDINATES",
+        geometry_column=["longitude", "latitude"],
     )
     assert arcpy.Exists(str(out_fc))
     assert int(arcpy.management.GetCount(str(out_fc))[0]) > 0
