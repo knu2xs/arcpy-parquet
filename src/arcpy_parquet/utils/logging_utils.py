@@ -3,21 +3,23 @@ import logging
 from pathlib import Path
 from typing import Union, Optional
 
-__all__ = ['get_logger']
+__all__ = ["get_logger"]
 
 if importlib.util.find_spec("arcpy") is None:
     has_arcpy = False
 else:
     has_arcpy = True
     import arcpy
-    __all__ = __all__ + ['ArcpyHandler']
+
+    __all__ = __all__ + ["ArcpyHandler"]
 
 if importlib.util.find_spec("pandas") is None:
     has_pandas = False
 else:
     has_pandas = True
     import pandas as pd
-    __all__ = __all__ + ['log_pandas_df']
+
+    __all__ = __all__ + ["log_pandas_df"]
 
 
 class ArcpyHandler(logging.Handler):
@@ -44,14 +46,16 @@ class ArcpyHandler(logging.Handler):
     """
 
     # since everything goes through ArcPy methods, we do not need a message line terminator
-    terminator = ''
+    terminator = ""
 
     def __init__(self, level: Union[int, str] = 10):
 
         # throw logical error if arcpy not available
         if not has_arcpy:
-            raise EnvironmentError('The ArcPy handler requires an environment with ArcPy, a Python environment with '
-                                   'ArcGIS Pro or ArcGIS Enterprise.')
+            raise EnvironmentError(
+                "The ArcPy handler requires an environment with ArcPy, a Python environment with "
+                "ArcGIS Pro or ArcGIS Enterprise."
+            )
 
         # call the parent to cover rest of any potential setup
         super().__init__(level=level)
@@ -85,9 +89,9 @@ class ArcpyHandler(logging.Handler):
 
 # setup logging
 def get_logger(
-        logger_name: Optional[str] = None,
-        log_level: Optional[Union[str, int]] = 'INFO',
-        logfile_pth: Union[Path, str] = None
+    logger_name: Optional[str] = None,
+    log_level: Optional[Union[str, int]] = "INFO",
+    logfile_pth: Union[Path, str] = None,
 ) -> logging.Logger:
     """
     Get Python :class:`Logger<logging.Logger>` configured to provide stream, file or, if available, ArcPy output.
@@ -125,15 +129,21 @@ def get_logger(
 
     """
     # ensure valid logging level
-    log_str_lst = ['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL', 'WARN', 'FATAL']
+    log_str_lst = ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL", "WARN", "FATAL"]
     log_int_lst = [0, 10, 20, 30, 40, 50]
 
     if not isinstance(log_level, (str, int)):
-        raise ValueError('You must define a specific logging level for log_level as a string or integer.')
+        raise ValueError(
+            "You must define a specific logging level for log_level as a string or integer."
+        )
     elif isinstance(log_level, str) and log_level not in log_str_lst:
-        raise ValueError(f'The log_level must be one of {log_str_lst}. You provided "{log_level}".')
+        raise ValueError(
+            f'The log_level must be one of {log_str_lst}. You provided "{log_level}".'
+        )
     elif isinstance(log_level, int) and log_level not in log_int_lst:
-        raise ValueError(f'If providing an integer for log_level, it must be one of the following, {log_int_lst}.')
+        raise ValueError(
+            f"If providing an integer for log_level, it must be one of the following, {log_int_lst}."
+        )
 
     # get a logger object instance
     logger = logging.getLogger(logger_name)
@@ -144,7 +154,7 @@ def get_logger(
     logger.setLevel(log_level)
 
     # configure formatting
-    log_frmt = logging.Formatter('%(asctime)s | %(levelname)s | %(message)s')
+    log_frmt = logging.Formatter("%(asctime)s | %(levelname)s | %(message)s")
 
     # create handler to console
     ch = logging.StreamHandler()
@@ -172,16 +182,18 @@ def get_logger(
     return logger
 
 
-def log_pandas_df(logger: logging.Logger, pandas_df: pd.DataFrame, title: str, line_tab_prefix='\t\t') -> None:
+def format_pandas_dataframe_for_logging(
+    pandas_df: pd.DataFrame, title: str, line_tab_prefix="\t\t"
+) -> str:
     """
     Helper function facilitating outputting a :class:`Pandas DataFrame<pandas.DataFrame>` into a logfile. This typically
     is used for including descriptive statistics in logfile outputs.
 
     Args:
-        logger: Logger being used.
         pandas_df: Pandas ``DataFrame`` to be converted to a string and included in the logfile.
         title: String title describing the data frame.
         line_tab_prefix: Optional string comprised of tabs (``\\t\\t``) to prefix each line with providing indentation.
     """
-    log_str = line_tab_prefix.join(pandas_df.to_string(index=False).splitlines(True))
-    logger.info(f'{title}:\n{line_tab_prefix}{log_str}')
+    df_log_str = line_tab_prefix.join(pandas_df.to_string(index=False).splitlines(True))
+    log_str = f"{title}:\n{line_tab_prefix}{df_log_str}"
+    return log_str

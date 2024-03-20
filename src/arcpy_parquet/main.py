@@ -1,3 +1,4 @@
+import importlib.util
 import logging
 from pathlib import Path
 import time
@@ -9,12 +10,13 @@ import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
 
-from .arcpy_logging import get_logger
+from .utils.logging_utils import get_logger
 
 __all__ = ["create_schema_file", "parquet_to_feature_class", "feature_class_to_parquet"]
 
 geom_dict = {
     "COORDINATES": ("POINT", "DISABLED", "DISABLED"),
+    "H3": ("POLYGON", "DISABLED", "DISABLED"),
     "POINT": ("POINT", "DISABLED", "DISABLED"),
     "POINT M": ("POINT", "ENABLED", "DISABLED"),
     "POINT Z": ("POINT", "DISABLED", "ENABLED"),
@@ -250,7 +252,7 @@ def get_partition_column(pqt_prt: str) -> str:
     return col_nm
 
 
-def get_available_partitions(pqt_pth: Path) -> Tuple[str]:
+def get_available_partitions(pqt_pth: Path) -> Tuple[str, ...]:
     """
     Helper function to get a list of partition columns used.
 
@@ -261,9 +263,92 @@ def get_available_partitions(pqt_pth: Path) -> Tuple[str]:
         Tuple of any partitioned columns.
     """
     pqt_pth = pqt_pth if isinstance(pqt_pth, Path) else Path(pqt_pth)
-    pqt_cols = set(p for p in pqt_pth.glob("**/*=*") if p.is_dir())
+    pqt_cols = tuple(set(str(p) for p in pqt_pth.glob("**/*=*") if p.is_dir()))
 
     return pqt_cols
+
+
+def h3_index_to_geometry(h3_index: str, geometry_type: Optional[str] = "polygon"):
+    """
+    Create an ``arcpy.Geometry`` object from a hexadecimal H3 index.
+
+    Args:
+        h3_index: Single hexadecimal H3 index.
+        geometry_type: Type of ``arcpy.Geometry`` desired, either ``polygon`` for ``arcpy.Polygon`` or ``point``
+            for ``arcpy.Point`` delineating the centroid.
+
+    Returns:
+        ``arcpy.Geometry``, either ``arcpy.Polygon`` delineating the area or ``arcpy.Point`` of the centroid, depending
+        on desired output defined in the input parameters.
+    """
+    # late import to accommodate potential for not having h3 installed in environment
+    if importlib.util.find_spec("h3") is None:
+        raise EnvironmentError(
+            "The h3-py package does not appear to be available in the current Python environment. "
+            "Creating H3 geometries from H3 indices requires the h3-py package to be installed in "
+            "the current environment."
+        )
+    import h3
+    from h3.api import basic_int as h3_int
+
+    # detect type of h3 index, integer or hexadecimal
+    if isinstance(h3_index, int):
+        h3_typ = "int"
+    elif h3_index.isnumeric():
+        h3_typ = "int"
+        h3_index = int(h3_index)
+    else:
+        h3_typ = "hex"
+
+    # all coordinates are in WGS84
+    sptl_rfrnc = arcpy.SpatialReference(4326)
+
+    # ensure geometry type is lowercase for comparisons
+    geometry_type = geometry_type.lower()
+
+    # since inner H3 errors are strange, catch at higher level
+    try:
+
+        if geometry_type == "point":
+
+            # get the coordinates
+            if h3_typ == "int":
+                y, x = h3_int.cell_to_latlng(h3_index)
+            else:
+                y, x = h3.cell_to_latlng(h3_index)
+
+            # create a point geometry
+            geom = arcpy.PointGeometry(arcpy.Point(x, y), spatial_reference=sptl_rfrnc)
+
+        elif geometry_type == "poly" or geometry_type == "polygon":
+
+            # get the tuple of tuples with the bounding coordinates for the h3 index polygon boundary
+            if h3_typ == "int":
+                h3_bndry = h3_int.cell_to_boundary(h3_index)
+            else:
+                h3_bndry = h3.cell_to_boundary(h3_index)
+
+            # switch the coordinate order for esri geometry
+            h3_bndry = reversed(h3_bndry)
+
+            # since the coordinates are y, x pairs, reverse to x, y to create Points and load into an Array
+            pt_arr = arcpy.Array([arcpy.Point(x, y) for y, x in h3_bndry])
+
+            # add the first point to the end to close the polygon
+            pt_arr.append(pt_arr[0])
+
+            # use the array to create the polygon geometry
+            geom = arcpy.Polygon(pt_arr, spatial_reference=sptl_rfrnc)
+
+        else:
+            raise ValueError(
+                f'geometry_type must be one of ["point", "polygon"]. You provided "{geometry_type}"'
+            )
+
+    except:
+        raise logging.warning(f'Cannot create geometry for H3 index "{h3_index}"')
+
+    return geom
 
 
 def parquet_to_feature_class(
@@ -289,8 +374,10 @@ def parquet_to_feature_class(
         parquet_path: The directory or Parquet part file to convert.
         output_feature_class: Where to save the new Feature Class.
         schema_file: CSV file with detailed schema properties.
-        geometry_type: ``POINT``, ``COORDINATES``, ``POLYLINE``, or ``POLYGON`` describing the geometry type. Default
-            is ``POINT``. ``COORDINATES``, is a point geometry type described by two coordinate columns.
+        geometry_type: ``POINT``, ``COORDINATES``, ``H3`` ``POLYLINE``, or ``POLYGON`` describing the geometry type.
+            Default is ``COORDINATES``. ``COORDINATES``, is a point geometry type described by two coordinate columns.
+            ``H3`` is a column containing H3 indices as hexadecimal strings. Polygon geometries will be created based
+            on the H3 indices for the rows.
         parquet_partitions: Partition name and values, if available, to select. For instance,
             if partitioned by country column using ISO2 identifiers, select Mexico using
             ``country=mx``.
@@ -374,7 +461,7 @@ def parquet_to_feature_class(
     # create a PyArrow Table to read from
     pqt_ds = pq.ParquetDataset(parquet_path, use_legacy_dataset=False)
 
-    # slightly change how column names are handled if using coordinates
+    # slightly change how column names are handled if using coordinates or h3
     if isinstance(geometry_column, (tuple, list)):
 
         # ensure coordinate columns are in input data
@@ -401,19 +488,21 @@ def parquet_to_feature_class(
     else:
 
         # ensure geometry column is in input data
-        if geometry_column not in pqt_ds.schema:
+        if geometry_column not in pqt_ds.schema.names:
             raise ValueError(
                 "The geometry_column does not appear to be in the input parquet columns."
             )
 
         # get a list of the string column types and field aliases from parquet
-        col_typ_lst, attr_alias_lst = [
-            (str(c.type.value_type), c.name)
-            if isinstance(c.type, pa.DictionaryType)
-            else str(c.type)
-            for c in pqt_ds.schema
-            if c.name != geometry_column
-        ]
+        col_typ_lst, attr_alias_lst = zip(
+            *[
+                (str(c.type.value_type), c.name)
+                if isinstance(c.type, pa.DictionaryType)
+                else (str(c.type), c.name)
+                for c in pqt_ds.schema
+                if c.name not in geometry_column
+            ]
+        )
 
     # prepend any column names starting with a number with an 'c' and save as the field names
     attr_nm_lst = [f"c{c}" if c[0].isdigit() else c for c in attr_alias_lst]
@@ -515,16 +604,14 @@ def parquet_to_feature_class(
     # depending on the input geometry type, set the insert cursor geometry type
     if geometry_type == "COORDINATES":
         insert_geom_typ = "SHAPE@XY"
+    elif geometry_type == "H3":
+        insert_geom_typ = "SHAPE@"
     else:
         insert_geom_typ = "SHAPE@WKB"
 
     # create the list of feature class columns for the insert cursor and for row lookup from parquet from pydict object
     insert_col_lst = list(fc_fld_dict.values()) + [insert_geom_typ]
-
-    if geometry_type == "COORDINATES":
-        pydict_col_lst = list(fc_fld_dict.keys())
-    else:
-        pydict_col_lst = list(fc_fld_dict.keys()) + [geometry_column]
+    pydict_col_lst = list(fc_fld_dict.keys())
 
     # this prevents pyarrow from getting hung up
     arcpy.env.autoCancelling = False
@@ -579,10 +666,20 @@ def parquet_to_feature_class(
 
                     # if the geometry is being generated from coordinate columns, create the coordinate tuple
                     if geometry_type == "COORDINATES":
-                        row_dict[insert_geom_typ] = (
+                        geom_tpl = (
                             row_pydict[geometry_column[0]],
                             row_pydict[geometry_column[1]],
                         )
+                        row_dict[insert_geom_typ] = geom_tpl
+
+                    # if geometry created from H3 index, create the geometry
+                    elif geometry_type == "H3":
+                        geom = h3_index_to_geometry(row_pydict[geometry_column])
+                        row_dict[insert_geom_typ] = geom
+
+                    # otherwise, just tack wkb geometry onto list
+                    else:
+                        row_dict[insert_geom_typ] = row_pydict[geometry_column]
 
                     # create a row object by plucking out the values from the row dictionary
                     row = tuple(row_dict.values())
@@ -600,9 +697,7 @@ def parquet_to_feature_class(
                     fail_cnt += 1
 
                     # make sure the reason is tracked
-                    logging.warning(
-                        f"Could not import row.\n\nContents:{row}\n\nMessage: {e}"
-                    )
+                    logging.warning(f"Could not import row.\n\nMessage: {e}")
 
                 # check of at sample count
                 if added_cnt == sample_count:
