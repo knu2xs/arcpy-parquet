@@ -642,7 +642,16 @@ def parquet_to_feature_class(
         # iterate the parquet part files
         for part_file in pqt_prts:
 
-            # load into a PyArrow Table - thankfully partition aware
+            # get path parts for potential parent partitions
+            partition_lst = [pth_prt.split('=') for pth_prt in part_file.relative_to(parquet_path).parent.parts]
+
+            # if there are parent partitions, load them into a dictionary
+            if len(partition_lst) > 0:
+                partition_values_dict = dict(partition_lst)
+            else:
+                partition_values_dict = {}
+
+            # load part file into a PyArrow Table
             pa_tbl = pq.read_table(part_file)
 
             # pull the parquet data into a dict
