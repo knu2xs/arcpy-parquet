@@ -481,7 +481,7 @@ def parquet_to_feature_class(
                 if isinstance(c.type, pa.DictionaryType)
                 else (str(c.type), c.name)
                 for c in pqt_ds.schema
-                if c.name not in geometry_column
+                # if c.name not in geometry_column  # geomery columns get dropped
             ]
         )
 
@@ -660,6 +660,9 @@ def parquet_to_feature_class(
             # for every row index in the number of rows
             for pqt_idx in range(pa_tbl.num_rows):
 
+                # instantiate the row variable so error messages can be formatted.
+                row = None
+
                 # try to add the row
                 try:
 
@@ -702,11 +705,19 @@ def parquet_to_feature_class(
                 # if cannot add the row
                 except Exception as e:
 
-                    # update the fail count
-                    fail_cnt += 1
+                    # handle case of having issues prior to even getting the row
+                    if row is None:
+                        raise
 
-                    # make sure the reason is tracked
-                    logging.warning(f"Could not import row.\n\nMessage: {e}")
+                    else:
+
+                        # update the fail count
+                        fail_cnt += 1
+
+                        # make sure the reason is tracked
+                        logging.warning(
+                            f"Could not import row.\n\nContents:{row}\n\nMessage: {e}"
+                        )
 
                 # check of at sample count
                 if added_cnt == sample_count:
