@@ -13,7 +13,7 @@ class ArcpyHandler(logging.Handler):
     DEBUG and INFO logging messages are be handled by the AddMessage method. WARNING logging messages are handled
     by the AddWarning method. ERROR and CRITICAL logging messages are handled by the AddError method.
     Basic use consists of the following.
-    
+
     ``` python
     logger = logging.getLogger('arcpy-logger')
     logger.setLevel('INFO')
@@ -45,7 +45,7 @@ class ArcpyHandler(logging.Handler):
         """
         Args:
             record: Record containing all information needed to emit a new logging event.
-        
+
         Note:
             This method should not be called directly, but rather enables the ``Logger`` methods to
             be able to use this handler correctly.
@@ -174,6 +174,7 @@ def format_pandas_for_logging(
         line_tab_prefix: Optional string comprised of tabs (``\\t\\t``) to prefix each line with providing indentation.
     """
     import pandas as pd
+
     log_str = line_tab_prefix.join(pandas_df.to_string(index=False).splitlines(True))
     log_str = f"{title}:\n{line_tab_prefix}{log_str}"
     return log_str

@@ -6,6 +6,6 @@ __copyright__ = "Copyright 2023 by Joel McCune (https://github.com/knu2xs)"
 
 # add specific imports below if you want to organize your code into modules, which is mostly what I do
 from . import utils
-from .__main__ import example_function, ExampleObject
+from .__main__ import feature_class_to_parquet, parquet_to_feature_class
 
-__all__ = ["example_function", "ExampleObject", "utils"]
+__all__ = ["feature_class_to_parquet", "parquet_to_feature_class", "utils"]

@@ -10,8 +10,6 @@ import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
 
-from .utils.logging_utils import configure_logging
-
 __all__ = ["create_schema_file", "parquet_to_feature_class", "feature_class_to_parquet"]
 
 geom_dict = {
@@ -100,7 +98,6 @@ def feature_class_to_parquet(
         exclude_fld_lst.append(desc["OIDFieldName"])
 
     for shp_fld_key in ["lengthFieldName", "areaFieldName"]:
-
         shp_fld = desc.get(shp_fld_key)
         if shp_fld is not None:
             exclude_fld_lst.append(shp_fld)
@@ -126,7 +123,6 @@ def feature_class_to_parquet(
 
     # if the input has geometry (is a feature class)
     if desc.get("shapeFieldName") is not None and include_geometry:
-
         # get the name of the geometry column
         geom_nm = desc.get("shapeFieldName")
 
@@ -135,7 +131,6 @@ def feature_class_to_parquet(
 
         # if just outputting centroid (point coordinates)
         if pq_schema == "XY":
-
             # add X and Y columns to search cursor list and the output schema
             for prt in ["X", "Y"]:
                 sc_col_lst.append(f"{geom_nm}@{prt}")
@@ -143,7 +138,6 @@ def feature_class_to_parquet(
 
         # if working with any other output type, just use the specific output format
         else:
-
             # add the correct search cursor type
             sc_col_lst.append(f"{geom_nm}@{geometry_format}")
 
@@ -173,20 +167,17 @@ def feature_class_to_parquet(
 
     # create a search cursor to work through the data_dir
     with arcpy.da.SearchCursor(str(input_table), sc_col_lst) as search_cur:
-
         # variable for batch numbering
         prt_num = 0
 
         # begin to iterate through the features
         for idx, row in enumerate(search_cur):
-
             # add each row column partition_column_list to the respective key in the dictionary
             for col, val in zip(pq_schema.names, row):
                 pa_dict[col].append(val)
 
             # if at a percent interval
             if idx % rep_range == 0:
-
                 # report progress
                 arcpy.SetProgressorPosition(idx)
 
@@ -308,9 +299,7 @@ def h3_index_to_geometry(h3_index: str, geometry_type: Optional[str] = "polygon"
 
     # since inner H3 errors are strange, catch at higher level
     try:
-
         if geometry_type == "point":
-
             # get the coordinates
             if h3_typ == "int":
                 y, x = h3_int.cell_to_latlng(h3_index)
@@ -321,7 +310,6 @@ def h3_index_to_geometry(h3_index: str, geometry_type: Optional[str] = "polygon"
             geom = arcpy.PointGeometry(arcpy.Point(x, y), spatial_reference=sptl_rfrnc)
 
         elif geometry_type == "poly" or geometry_type == "polygon":
-
             # get the tuple of tuples with the bounding coordinates for the h3 index polygon boundary
             if h3_typ == "int":
                 h3_bndry = h3_int.cell_to_boundary(h3_index)
@@ -416,7 +404,6 @@ def parquet_to_feature_class(
         )
 
     elif parquet_path.is_dir():
-
         # get all the part files to start with
         pqt_prts = [prt for prt in parquet_path.rglob("part-*.parquet")]
 
@@ -435,7 +422,6 @@ def parquet_to_feature_class(
             "part files."
         )
     elif parquet_path.is_file():
-
         assert (
             parquet_partitions is None
         ), "If providing a parquet part file, you cannot specify a parquet partition."
@@ -463,7 +449,6 @@ def parquet_to_feature_class(
 
     # slightly change how column names are handled if using coordinates or h3
     if isinstance(geometry_column, (tuple, list)):
-
         # ensure coordinate columns are in input data
         if (
             geometry_column[0] not in pqt_ds.schema.names
@@ -486,7 +471,6 @@ def parquet_to_feature_class(
         )
 
     else:
-
         # ensure geometry column is in input data
         if geometry_column not in pqt_ds.schema.names:
             raise ValueError(
@@ -531,7 +515,6 @@ def parquet_to_feature_class(
         schema_dict = {}
 
     else:
-
         # read the csv into a Pandas DataFrame
         schema_df = pd.read_csv(schema_file)
 
@@ -545,7 +528,6 @@ def parquet_to_feature_class(
 
     # iteratively add columns using the introspected field name, alias, and type
     for nm, alias, typ in zip(attr_nm_lst, attr_alias_lst, fld_typ_lst):
-
         # if the field name exists in the dictionary, peel off a single field's properties and add a field using them
         if nm in schema_dict.keys():
             prop_dict = schema_dict.pop(nm)
@@ -629,7 +611,6 @@ def parquet_to_feature_class(
     with arcpy.da.InsertCursor(
         str(output_feature_class), insert_col_lst
     ) as insert_cursor:
-
         # partition replacement values dictionary
         partition_values_dict = {}
 
@@ -641,9 +622,11 @@ def parquet_to_feature_class(
 
         # iterate the parquet part files
         for part_file in pqt_prts:
-
             # get path parts for potential parent partitions
-            partition_lst = [pth_prt.split('=') for pth_prt in part_file.relative_to(parquet_path).parent.parts]
+            partition_lst = [
+                pth_prt.split("=")
+                for pth_prt in part_file.relative_to(parquet_path).parent.parts
+            ]
 
             # if there are parent partitions, load them into a dictionary
             if len(partition_lst) > 0:
@@ -659,13 +642,11 @@ def parquet_to_feature_class(
 
             # for every row index in the number of rows
             for pqt_idx in range(pa_tbl.num_rows):
-
                 # instantiate the row variable so error messages can be formatted.
                 row = None
 
                 # try to add the row
                 try:
-
                     # start creating a dict of single key partition_column_list pairs for this row of data_dir
                     row_pydict = {k: v[pqt_idx] for k, v in pqt_pydict.items()}
 
@@ -704,13 +685,11 @@ def parquet_to_feature_class(
 
                 # if cannot add the row
                 except Exception as e:
-
                     # handle case of having issues prior to even getting the row
                     if row is None:
                         raise
 
                     else:
-
                         # update the fail count
                         fail_cnt += 1
 
@@ -726,7 +705,6 @@ def parquet_to_feature_class(
 
                 # provide status updates every 1000 features, and provide an exit if cancelled
                 if added_cnt % 1000 == 0:
-
                     arcpy.SetProgressorLabel(f"Imported {added_cnt:,} rows...")
 
                     if arcpy.env.isCancelled:
@@ -734,7 +712,6 @@ def parquet_to_feature_class(
 
                 # provide messages every 10,000 features
                 if added_cnt % 10000 == 0:
-
                     # find the elapsed time
                     elapsed_time = time.time() - start_time
 
