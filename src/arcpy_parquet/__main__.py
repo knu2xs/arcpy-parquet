@@ -524,6 +524,15 @@ def parquet_to_feature_class(
         schema_dict = {}
 
     else:
+
+        # if a directory for the schema is provided, get the enclosed csv file
+        if schema_file.is_dir() and schema_file.stem == 'schema':
+
+            # try to get the csv file
+            csv_lst = list(schema_file.glob('*.csv'))
+            if len(csv_lst) > 0:
+                schema_file = csv_lst[0]
+
         # read the csv into a Pandas DataFrame
         schema_df = pd.read_csv(schema_file)
 
