@@ -1,4 +1,4 @@
-site_name: ArcPy Parquet 0.1.2
+site_name: ArcPy Parquet 0.2.0.dev0
 
 docs_dir: mkdocs
 site_dir: ../docs

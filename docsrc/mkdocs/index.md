@@ -1,7 +1,7 @@
 ---
 title: Home
 ---
-# ArcPy Parquet 0.1.2 Documentation
+# ArcPy Parquet 0.2.0.dev0 Documentation
 
 This is the documentation for ArcPy Parquet. All the Markdown (`md`) files in
 `./docsrc/mkdocs` become the documentation pages.
