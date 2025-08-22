@@ -4,7 +4,10 @@ from typing import Union, Optional
 
 from .main import has_arcpy
 
-__all__ = ["configure_logging", "format_pandas_for_logging"]
+__all__ = ["get_logger", "format_pandas_for_logging"]
+
+# formatting string (useful if doing setting up handlers)
+standard_log_format = logging.Formatter("%(asctime)s | %(name)s | %(levelname)s | %(message)s")
 
 
 class ArcpyHandler(logging.Handler):
@@ -70,10 +73,11 @@ class ArcpyHandler(logging.Handler):
 
 
 # setup logging
-def configure_logging(
+def get_logger(
     level: Optional[Union[str, int]] = "INFO",
+    logger_name: Optional[str] = None,
     logfile_path: Union[Path, str] = None,
-    propagate: bool = False,
+    propagate: bool = True,
 ) -> logging.Logger:
     """
     Get Python :class:`Logger<logging.Logger>` configured to provide stream, file or, if available, ArcPy output.
@@ -92,7 +96,9 @@ def configure_logging(
 
     Args:
         level: Logging level to use. Default is `'INFO'`.
+        logger_name: Optional logger name to use. If not provided, gets and returns default logger.
         logfile_path: Where to save the logfile if file output is desired.
+        propagate: Whether to propagate messages up to the default logger or not.
 
     ``` python
     # only output to console and potentially Pro if ArcPy is available
@@ -123,24 +129,26 @@ def configure_logging(
         )
 
     # get default logger and set logging level at the same time
-    logger = logging.getLogger()
+    logger = logging.getLogger(name=logger_name)
     logger.setLevel(level=level)
 
-    # clear handlers
-    logger.handlers.clear()
+    # clear handlers if Default loger so can configure formatting for streaming handler.
+    if logger_name is None:
+        logger.handlers.clear()
 
-    # configure formatting
-    log_frmt = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+    # control bubbling if desired
+    logger.propagate = propagate
 
     # make sure at least a stream handler is present
-    ch = logging.StreamHandler()
-    ch.setFormatter(log_frmt)
-    logger.addHandler(ch)
+    if not logfile_path and not has_arcpy:
+        ch = logging.StreamHandler()
+        ch.setFormatter(standard_log_format)
+        logger.addHandler(ch)
 
     # if in an environment with ArcPy, add handler to bubble logging up to ArcGIS through ArcPy
     if has_arcpy:
         ah = ArcpyHandler()
-        ah.setFormatter(log_frmt)
+        ah.setFormatter(standard_log_format)
         logger.addHandler(ah)
 
     # if a path for the logfile is provided, log results to the file
@@ -151,7 +159,7 @@ def configure_logging(
 
         # create and add the file handler
         fh = logging.FileHandler(str(logfile_path))
-        fh.setFormatter(log_frmt)
+        fh.setFormatter(standard_log_format)
         logger.addHandler(fh)
 
     return logger

@@ -1,5 +1,6 @@
+__all__ = ["create_schema_file", "parquet_to_feature_class", "feature_class_to_parquet"]
+
 import importlib.util
-import logging
 from pathlib import Path
 import time
 from typing import List, Optional, Tuple, Union
@@ -10,8 +11,12 @@ import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
 
-__all__ = ["create_schema_file", "parquet_to_feature_class", "feature_class_to_parquet"]
+from arcpy_parquet.utils import get_logger
 
+# set up logging
+logger = get_logger(level='DEBUG', logger_name='arcpy_parquet.main')
+
+# dictionary for handling input geometry types
 geom_dict = {
     "COORDINATES": ("POINT", "DISABLED", "DISABLED"),
     "H3": ("POLYGON", "DISABLED", "DISABLED"),
@@ -28,6 +33,8 @@ geom_dict = {
     "MULTIPOINT M": ("MULTIPOINT", "ENABLED", "DISABLED"),
     "MULTIPOINT Z": ("MULTIPOINT", "DISABLED", "ENABLED"),
 }
+
+# mapping data types for going from parquet to a feature class
 import_dtype_dict = {
     "int8": "INTEGER",
     "int16": "INTEGER",
@@ -42,6 +49,8 @@ import_dtype_dict = {
     "date": "DATE",
     "date32[day]": "DATE",
 }
+
+# mapping data types for going from a feature class to parquet
 export_dtype_dict = {
     "OID": pa.int64(),
     "Date": pa.timestamp("s"),
@@ -162,7 +171,7 @@ def feature_class_to_parquet(
     # turn off auto cancelling since handling in loop
     arcpy.env.autoCancelling = False
 
-    # create a template dictionary for data_dir export
+    # create a template dictionary for data export
     pa_dict = {col: [] for col in pq_schema.names}
 
     # create a search cursor to work through the data_dir
@@ -292,7 +301,7 @@ def h3_index_to_geometry(h3_index: str, geometry_type: Optional[str] = "polygon"
         h3_typ = "hex"
 
     # all coordinates are in WGS84
-    sptl_rfrnc = arcpy.SpatialReference(4326)
+    sr = arcpy.SpatialReference(4326)
 
     # ensure geometry type is lowercase for comparisons
     geometry_type = geometry_type.lower()
@@ -302,31 +311,31 @@ def h3_index_to_geometry(h3_index: str, geometry_type: Optional[str] = "polygon"
         if geometry_type == "point":
             # get the coordinates
             if h3_typ == "int":
-                y, x = h3_int.cell_to_latlng(h3_index)
+                y, x = h3_int.h3_to_geo(h3_index)
             else:
-                y, x = h3.cell_to_latlng(h3_index)
+                y, x = h3.h3_to_geo(h3_index)
 
             # create a point geometry
-            geom = arcpy.PointGeometry(arcpy.Point(x, y), spatial_reference=sptl_rfrnc)
+            geom = arcpy.PointGeometry(arcpy.Point(x, y), spatial_reference=sr)
 
         elif geometry_type == "poly" or geometry_type == "polygon":
             # get the tuple of tuples with the bounding coordinates for the h3 index polygon boundary
             if h3_typ == "int":
-                h3_bndry = h3_int.cell_to_boundary(h3_index)
+                h3_boundary = h3_int.h3_to_geo_boundary(h3_index)
             else:
-                h3_bndry = h3.cell_to_boundary(h3_index)
+                h3_boundary = h3.h3_to_geo_boundary(h3_index)
 
             # switch the coordinate order for esri geometry
-            h3_bndry = reversed(h3_bndry)
+            h3_boundary = reversed(h3_boundary)
 
             # since the coordinates are y, x pairs, reverse to x, y to create Points and load into an Array
-            pt_arr = arcpy.Array([arcpy.Point(x, y) for y, x in h3_bndry])
+            pt_arr = arcpy.Array([arcpy.Point(x, y) for y, x in h3_boundary])
 
             # add the first point to the end to close the polygon
             pt_arr.append(pt_arr[0])
 
             # use the array to create the polygon geometry
-            geom = arcpy.Polygon(pt_arr, spatial_reference=sptl_rfrnc)
+            geom = arcpy.Polygon(pt_arr, spatial_reference=sr)
 
         else:
             raise ValueError(
@@ -334,7 +343,7 @@ def h3_index_to_geometry(h3_index: str, geometry_type: Optional[str] = "polygon"
             )
 
     except:
-        raise logging.warning(f'Cannot create geometry for H3 index "{h3_index}"')
+        raise logger.warning(f'Cannot create geometry for H3 index "{h3_index}"')
 
     return geom
 
@@ -508,7 +517,7 @@ def parquet_to_feature_class(
         has_z=geom_dict[geometry_type][2],
     )
 
-    logging.info(f"Created feature class at {str(output_feature_class)}")
+    logger.info(f"Created feature class at {str(output_feature_class)}")
 
     # if a schema file is provided as part of input, load it to a dict using Pandas because it's easy
     if schema_file is None:
@@ -560,7 +569,7 @@ def parquet_to_feature_class(
             )
 
         # log progress
-        logging.info(f"Field added to Feature Class {log_dict}")
+        logger.info(f"Field added to Feature Class {log_dict}")
 
     # if any fields are defined in the schema file still left over, add them
     for nm in schema_dict.keys():
@@ -572,7 +581,7 @@ def parquet_to_feature_class(
         log_dict = dict()
         log_dict["in_table"] = str(output_feature_class)
         log_dict = {**log_dict, **schema_dict}
-        logging.info(
+        logger.info(
             f"Field added from schema file, but not detected in input data {log_dict}"
         )
 
@@ -694,7 +703,7 @@ def parquet_to_feature_class(
                         fail_cnt += 1
 
                         # make sure the reason is tracked
-                        logging.warning(
+                        logger.warning(
                             f"Could not import row.\n\nContents:{row}\n\nMessage: {e}"
                         )
 
@@ -718,7 +727,7 @@ def parquet_to_feature_class(
                     # calculate the rate per hour
                     rate = round(added_cnt / elapsed_time * 3600)
 
-                    logging.info(
+                    logger.info(
                         f"Imported {added_cnt:,} rows at a rate of {rate:,} per hour..."
                     )
 
@@ -730,23 +739,23 @@ def parquet_to_feature_class(
     success_msg = f"Successfully imported {added_cnt:,} rows."
     arcpy.SetProgressorLabel(success_msg)
     arcpy.ResetProgressor()
-    logging.info(success_msg)
+    logger.info(success_msg)
 
     if fail_cnt > 0:
         fail_msg = f"Failure count: {fail_cnt:,}"
-        logging.warning(fail_msg)
+        logger.warning(fail_msg)
 
     # if compacting, do it
     if compact:
         arcpy.SetProgressorLabel("Compacting data.")
         arcpy.management.Compact(str(output_feature_class.parent))
-        logging.info("Successfully compacted data.")
+        logger.info("Successfully compacted data.")
 
     # build spatial index if requested
     if build_spatial_index:
         arcpy.SetProgressorLabel("Building spatial index.")
         arcpy.management.AddSpatialIndex(str(output_feature_class))
-        logging.info("Completed building spatial index.")
+        logger.info("Completed building spatial index.")
 
     return output_feature_class
 

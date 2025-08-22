@@ -73,7 +73,7 @@ class CreateDataDirectory:
     def execute(self, parameters, messages):
         """The source code of the tool."""
         # configure logging so messages bubble up through ArcPy
-        arcpy_parquet.utils.configure_logging("INFO")
+        arcpy_parquet.utils.get_logger("INFO")
 
         # retrieve the data directory path from parameters
         dir_data = parameters[0].valueAsText
