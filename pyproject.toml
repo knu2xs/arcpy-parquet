@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=61.0", "setuptools-scm>=8.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "arcpy-parquet"
+version = "0.1.2"
+authors = [
+  { name="Joel McCune (https://github.com/knu2xs)"},
+]
+description = "Conversion utilties for Parquet data using ArcPy."
+readme = "README.md"
+requires-python = ">=3.9"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: Apache Software License",
+]
+license = {file = "LICENSE"}
+dependencies = [
+    "arcgis>=2.4.0",
+    "numpy>=1.7",
+    "pandas>=1.0.5",
+    "pyarrow>=1.0.0"
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["arcpy_parquet"]

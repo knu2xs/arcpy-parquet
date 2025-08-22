@@ -38,17 +38,17 @@ GOTO %1
 
 :: Perform data preprocessing steps contained in the make_data.py script.
 :data
-    CALL python src/make_data.py
+    CALL conda run -p %CONDA_DIR% python scripts/make_data.py
     GOTO end
 
-:: Make documentation using Sphinx!
+:: Make documentation using MkDocs!
 :docs
-    CALL conda run -p %CONDA_DIR% sphinx-build -a -b html docsrc docs
+    CALL conda run -p %CONDA_DIR% mkdocs build -f ./docsrc/mkdocs.yml
     GOTO end
 
-:: Create the Reveal.js slides from all the notebooks
-:slides
-    CAll conda run -p %CONDA_DIR% python src/ck_tools/create_reveal_slides.py
+:: MkDocs live documentation server
+:docserve
+    CALL conda run -p %CONDA_DIR% mkdocs serve -f ./docsrc/mkdocs.yml
     GOTO end
 
 :: Build the local environment from the environment file
@@ -66,45 +66,23 @@ GOTO %1
     :: Install the local package in development (experimental) mode
     CALL conda run -p %CONDA_DIR% python -m pip install -e .
 
-    :: Activate the environment
-    GOTO activate_env
-
-:: Activate the environment
-:activate_env
-    ENDLOCAL & CALL activate %CONDA_DIR%
     GOTO end
 
-:: Remove the environment
-:remove_env
-    CALL conda deactivate
-    CALL conda env remove -p %CONDA_DIR% -y
-	GOTO end
-
-:: Start Jupyter Lab
+:: Start Jupyter Label
 :jupyter
-    CALL conda run -p %CONDA_DIR% jupyter lab --ip=0.0.0.0 --allow-root --NotebookApp.token=""
+    CALL conda run -p %CONDA_DIR% python -m jupyterlab --ip=0.0.0.0 --allow-root --NotebookApp.token=""
+    GOTO end
+
+:: Make *.pyt zipped archive with requirements
+:pytzip
+    CALL conda run -p %CONDA_DIR% python -m scripts/make_pyt_archive.py
     GOTO end
 
 :: Make the package for uploading
-:build
+:wheel
 
     :: Build the pip package
-    CALL python setup.py sdist
-
-    :: Build conda package
-    CALL conda build ./conda-recipe --output-folder ./conda-recipe/conda-build
-
-    GOTO end
-
-:build_upload
-
-    :: Build the pip package
-    CALL python setup.py sdist bdist_wheel
-    CALL twine upload ./dist/*
-
-    :: Build conda package
-    CALL conda build ./conda-recipe --output-folder ./conda-recipe/conda-build
-    CALL anaconda upload ./conda-recipe/conda-build/win-64/arcpy-parquet*.tar.bz2
+    CALL conda run -p %CONDA_DIR% python -m build --wheel
 
     GOTO end
 
@@ -112,6 +90,17 @@ GOTO %1
 :test
 	CALL conda run -p %CONDA_DIR% pytest "%~dp0testing"
 	GOTO end
+
+:: black formatting
+:black
+    CALL conda run -p %CONDA_dIR% black src/ --verbose
+    GOTO end
+
+:lint
+    GOTO black
+
+:linter
+    GOTO black
 
 :end
     EXIT /B

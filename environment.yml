@@ -5,23 +5,25 @@ channels:
   - conda-forge
 
 dependencies:
+  - appnope
+  - arcgis-mapping
   - arcgis
   - black>=21
+  - h3-py
   - jupyterlab
   - jupyterlab_code_formatter
   - nodejs
-  - pandoc
   - pip
   - pytest
-  - python=3.9
   - pyarrow
   - pip:
     - autodocsumm
+    - build
     - bump2version
-    - furo
-    - nbsphinx
-    - sphinx
-    - sphinxcontrib-youtube
-    - sphinx-autodoc-typehints
-    - sphinx-copybutton
+    - mkdocs
+    - mkdocs-glightbox
+    - mkdocs-include-markdown-plugin
+    - mkdocs-jupyter
+    - mkdocs-material
+    - mkdocstrings[python]>=0.18
     - twine

@@ -54,12 +54,12 @@ htmlcov/
 # Sphinx documentation
 docsrc/_build/
 docsrc/build/
-docs/
 
 # PyBuilder
 target/
 
-# DotEnv configuration
+# configuration files
+**/secrets.ini
 .env
 
 # Database
@@ -88,9 +88,10 @@ models/
 # ignore the caches created for ArcMap
 arcgis/Index
 arcgis/ImportLog
+arcgis/.backups
 
 # make sure the environment is not included
 env/
 
-# doc build directory
+# exclude the docs build directory
 docs/

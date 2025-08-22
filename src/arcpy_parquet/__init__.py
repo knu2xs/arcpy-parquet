@@ -1,21 +1,11 @@
-__title__ = 'arcpy-parquet'
-__version__ = '0.1.2'
-__author__ = 'Joel McCune'
-__license__ = 'Apache 2.0'
-__copyright__ = 'Copyright 2022 by Joel McCune'
+__title__ = "arcpy-parquet"
+__version__ = "0.0.0"
+__author__ = "Joel McCune (https://github.com/knu2xs)"
+__license__ = "Apache 2.0"
+__copyright__ = "Copyright 2023 by Joel McCune (https://github.com/knu2xs)"
 
-"""
-Resources making data_dir import and export easier, and in some cases, *possible*, in an
-environment with ArcGIS.
+# add specific imports below if you want to organize your code into modules, which is mostly what I do
+from . import utils
+from .__main__ import example_function, ExampleObject
 
-.. note::
-
-    This module requires ``arcpy`` and ``pyarrow``. Both are included with the default
-    installation of ArcGIS Pro or the ArcGIS Enterprise Application Server component of
-    ArcGIS Enterprise.
-
-"""
-
-from .main import feature_class_to_parquet, parquet_to_feature_class, create_schema_file
-
-__all__ = ['feature_class_to_parquet', 'parquet_to_feature_class', 'create_schema_file']
+__all__ = ["example_function", "ExampleObject", "utils"]
