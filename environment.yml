@@ -17,7 +17,6 @@ dependencies:
   - pytest
   - pyarrow
   - pip:
-    - autodocsumm
     - build
     - bump2version
     - mkdocs

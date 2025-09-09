@@ -7,7 +7,9 @@ from .main import has_arcpy
 __all__ = ["get_logger", "format_pandas_for_logging"]
 
 # formatting string (useful if doing setting up handlers)
-standard_log_format = logging.Formatter("%(asctime)s | %(name)s | %(levelname)s | %(message)s")
+standard_log_format = logging.Formatter(
+    "%(asctime)s | %(name)s | %(levelname)s | %(message)s"
+)
 
 
 class ArcpyHandler(logging.Handler):
@@ -80,16 +82,17 @@ def get_logger(
     propagate: bool = True,
 ) -> logging.Logger:
     """
-    Get Python :class:`Logger<logging.Logger>` configured to provide stream, file or, if available, ArcPy output.
-    The way the method is set up, logging will be routed through ArcPy messaging using :class:`ArcpyHandler` if
-    ArcPy is available. If ArcPy is *not* available, messages will be sent to the console using a
-    :class:`StreamHandler<logging.StreamHandler>`. Next, if the `logfile_path` is provided, log messages will also
-    be written to the provided path to a logfile using a :class:`FileHandler<logging.FileHandler>`.
+    Get Python [`Logger`][logging.Logger] configured to provide stream, file or, if available, ArcPy output.
+    The way the method is set up, logging will be routed through ArcPy if ArcPy is available. If ArcPy is *not*
+    available, messages will be sent to the console using a [`StreamHandler`][logging.StreamHandler]. Next, if
+    the `logfile_path` is provided, log messages will also be written to the provided path to a logfile using
+    a [`FileHandler`][logging.FileHandler].
 
     Valid `log_level` inputs include:
+
     * `DEBUG` - Detailed information, typically of interest only when diagnosing problems.
     * `INFO` - Confirmation that things are working as expected.
-    * `WARNING` or ``WARN`` -  An indication that something unexpected happened, or indicative of some problem in the
+    * `WARNING` -  An indication that something unexpected happened, or indicative of some problem in the
         near future (e.g. "disk space low"). The software is still working as expected.
     * `ERROR` - Due to a more serious problem, the software has not been able to perform some function.
     * `CRITICAL` - A serious error, indicating that the program itself may be unable to continue running.

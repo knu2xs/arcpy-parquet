@@ -63,12 +63,16 @@ markdown_extensions:
 
 
 plugins:
+
+  # cross reference within docs
+  - autorefs
+
   # enable lightbox, enlarging images
   - glightbox
 
   # extension converting included notebooks into html at build time
   - mkdocs-jupyter:
-      include_source: True
+      include_source: true
 
   # extension handling pulling docstrings from Python package
   - mkdocstrings:
@@ -76,7 +80,9 @@ plugins:
       # explicitly enable generation of objects.ini facilitating intersphinx mapping
       enable_inventory: true
 
-      # show_root_heading: false
+      show_root_heading: false
+
+      default_handler: python
 
       handlers:
         python:
@@ -90,6 +96,9 @@ plugins:
           - https://pandas.pydata.org/docs/objects.inv
           - https://scikit-learn.org/stable/objects.inv
 
-          # use Google docstrings style
           options:
+            # use Google docstrings style
             docstring_style: google
+
+            # link to source
+            show_source: true

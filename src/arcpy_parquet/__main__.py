@@ -14,7 +14,7 @@ import pyarrow.parquet as pq
 from arcpy_parquet.utils import get_logger
 
 # set up logging
-logger = get_logger(level='DEBUG', logger_name='arcpy_parquet.main')
+logger = get_logger(level="DEBUG", logger_name="arcpy_parquet.main")
 
 # dictionary for handling input geometry types
 geom_dict = {
@@ -363,7 +363,7 @@ def parquet_to_feature_class(
     """
     Convert a *properly formatted* Parquet source into a Feature Class in a Geodatabase.
 
-    .. note::
+    !!! note
         The geometry *must* be encoded as well known binary (WKB), and complex field types
         such as arrays and structs are not supported.
 
@@ -524,12 +524,10 @@ def parquet_to_feature_class(
         schema_dict = {}
 
     else:
-
         # if a directory for the schema is provided, get the enclosed csv file
-        if schema_file.is_dir() and schema_file.stem == 'schema':
-
+        if schema_file.is_dir() and schema_file.stem == "schema":
             # try to get the csv file
-            csv_lst = list(schema_file.glob('*.csv'))
+            csv_lst = list(schema_file.glob("*.csv"))
             if len(csv_lst) > 0:
                 schema_file = csv_lst[0]
 
