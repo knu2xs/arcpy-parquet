@@ -1,12 +1,12 @@
 # -*- coding: utf-8 -*-
 import importlib.util
-import json
 from pathlib import Path
 from typing import List
 import sys
 
 import arcpy
 import pyarrow.parquet as pq
+from pyarrow.dataset import partitioning
 
 # import the local library, either if in system environment, or through relative path
 if importlib.util.find_spec("arcpy_parquet") is None:
@@ -66,6 +66,17 @@ class FeatureClassToParquet(object):
             parameterType="Required",
         )
 
+        partitioning_columns = arcpy.Parameter(
+            name="partitioning_columns",
+            displayName="Partitioning Columns",
+            datatype="Field",
+            parameterType="Optional",
+            direction="Input",
+            multiValue=True  # key setting for multi-select
+        )
+        partitioning_columns.enabled = True
+        partitioning_columns.parameterDependencies = [input_table.name]
+
         geometry_format = arcpy.Parameter(
             name="geometry_format",
             displayName="Geometry Format",
@@ -75,10 +86,10 @@ class FeatureClassToParquet(object):
             parameterType="Required",
         )
         geometry_format.filter.type = "ValueList"
-        geometry_format.filter.list = ["WKB", "WKT", "XY"]
+        geometry_format.filter.list = ["WKB", "XY"]
         geometry_format.value = "WKB"
 
-        param_lst = [input_table, output_parquet, geometry_format]
+        param_lst = [input_table, output_parquet, partitioning_columns, geometry_format]
 
         return param_lst
 
@@ -100,12 +111,19 @@ class FeatureClassToParquet(object):
         # provide output as actual path object
         out_pqt_pth = Path(parameters[1].valueAsText)
 
+        # get the partition columns as a list if provided
+        if parameters[2].value is not None:
+            partition_cols = parameters[2].valueAsText.split(";")
+        else:
+            partition_cols = None
+
         # get the literal value for the output format
-        geometry_format = parameters[2].valueAsText
+        geometry_format = parameters[3].valueAsText
 
         feature_class_to_parquet(
             input_table=in_tbl_pth,
             output_parquet=out_pqt_pth,
+            partition_columns=partition_cols,
             include_geometry=True,
             geometry_format=geometry_format,
             batch_size=300000,
@@ -118,7 +136,7 @@ class GeoparquetToFeatureClass(object):
     def __init__(self):
         self.label = "Geoparquet to Feature Class"
         self.description = (
-            "Convert a Parquet file with geometries saved as well known binary (WKB) to a Feature "
+            "Convert a Geoparquet or Parquet with coordinate columns (X an Y) to a Feature "
             "Class in a GeoDatabase."
         )
 
@@ -187,7 +205,7 @@ class GeoparquetToFeatureClass(object):
         )
 
         geom_type.filter.type = "ValueList"
-        fltr_lst = ["POINT", "POLYLINE", "POLYGON", "COORDINATES"]
+        fltr_lst = ["GEOPARQUET", "COORDINATES"]
         if has_h3:
             fltr_lst.append("H3")
         geom_type.filter.list = fltr_lst
@@ -552,18 +570,21 @@ class GeoparquetToFeatureClass(object):
 class CreateSchemaFile(object):
     def __init__(self):
         self.label = "Create Schema File"
-        self.description = "Create a CSV schema file from an existing Feature Class to use with imports."
+        self.description = "Create a CSV schema file from an existing Feature Class or Parquet dataset to use with imports."
         self.category = "Utilities"
 
     def getParameterInfo(self):
 
-        tmplt_fc_pth = arcpy.Parameter(
-            name="tmplt_fc_pth",
-            displayName="Template Feature Class Path",
-            datatype="DEFeatureClass",
+        template_dataset = arcpy.Parameter(
+            name="template_dataset",
+            displayName="Template Dataset Path",
+            datatype=["DEFeatureClass", "DEFolder", "DEFile"],
             direction="Input",
             parameterType="Required",
         )
+
+        # Apply filter for parquet files
+        # template_dataset.filter.list = ["*.parquet"]
 
         schema_file_pth = arcpy.Parameter(
             name="schema_file_pth",
@@ -573,7 +594,7 @@ class CreateSchemaFile(object):
             parameterType="Optional",
         )
 
-        param_lst = [tmplt_fc_pth, schema_file_pth]
+        param_lst = [template_dataset, schema_file_pth]
 
         return param_lst
 
@@ -596,12 +617,12 @@ class CreateSchemaFile(object):
         """The source code of the tool."""
 
         # unpack the parameters
-        tmplt_fc_pth = Path(parameters[0].valueAsText)
+        template_dataset = Path(parameters[0].valueAsText)
         schema_file_pth = Path(parameters[1].valueAsText)
 
         # execute the function
         create_schema_file(
-            template_feature_class_path=tmplt_fc_pth, output_schema_file=schema_file_pth
+            input_dataset=template_dataset, output_schema_file=schema_file_pth
         )
 
         return

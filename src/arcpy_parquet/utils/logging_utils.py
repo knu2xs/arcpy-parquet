@@ -1,3 +1,16 @@
+"""
+arcpy_parquet/utils/logging_utils.py
+
+Utility functions and classes for configuring logging with ArcPy integration.
+Provides customized logging handlers and formatters that work with both standard
+Python logging and Arcpy's messaging system.
+
+Created on: 2024
+Author: knu2xs
+License: Apache 2.0
+Copyright 2024
+Version: 1.0.0
+"""
 import logging
 from pathlib import Path
 from typing import Union, Optional

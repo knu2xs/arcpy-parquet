@@ -1,0 +1,7 @@
+﻿<?xml version="1.0" encoding="utf-8"?><messages><msg code="0" type="2">Start Time: Tuesday, 30 September, 2025 09:10:09</msg><msg code="1" type="100">﻿Traceback (most recent call last):
+﻿  File "&lt;string&gt;", line 624, in execute
+﻿  File "D:\projects\arcpy-parquet\src\arcpy_parquet\__main__.py", line 936, in create_schema_file
+﻿    if arcpy.da.Describe(input_dataset).get("type") == "FeatureClass":
+﻿       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+﻿RuntimeError: Object: Describe input value is not valid type
+</msg><msg code="-2147467259" type="100">Failed to execute (CreateSchemaFile).</msg><msg code="0" type="3">Failed at Tuesday, 30 September, 2025 09:10:09 (Elapsed Time: 0.27 seconds)</msg></messages>

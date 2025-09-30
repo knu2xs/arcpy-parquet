@@ -1,12 +1,12 @@
 from pathlib import Path
-from functools import cached_property
 import json
-from typing import Union
+from osgeo import osr
+from typing import Union, Literal, Optional, LiteralString
 
+import pyarrow as pa
 import pyarrow.parquet as pq
-import pyarrow.dataset as ds
 
-
+# template for the geoparquet metadata
 _template = {
     "version": "1.0.0",
     "primary_column": "geometry",
@@ -64,76 +64,70 @@ _template = {
     },
 }
 
-# get max length of a column from the metadata
-get_col_max_len = lambda col: len(col.statistics.max) if isinstance(col.statistics.max, str) else None
 
-# get maximum lengths for each row group in the table metadata
-get_row_group_max_lengths = lambda rg: [get_col_max_len(rg.column(idx)) for idx in range(rg.num_columns)]
+def ensure_parquet_dataset(
+    parquet_dataset: Union[str, Path, pq.ParquetDataset]
+) -> pq.ParquetDataset:
+    """Ensure the input is a ParquetDataset object."""
+    # don't do anything if already a ParquetDataset
+    if not isinstance(parquet_dataset, pq.ParquetDataset):
+        # if a string, make into a path
+        if isinstance(parquet_dataset, str):
+            parquet_dataset = Path(parquet_dataset)
 
+        # ensure the path exists
+        if not parquet_dataset.exists():
+            raise FileNotFoundError(
+                f"Cannot resolve Parquet dataset path: {parquet_dataset}"
+            )
 
-def get_string_columns(dataset: Union[Path, Dataset]) -> list[str]:
-    """Get list of string column names for a Parquet dataset"""
-    # create arrow dataset object if a path
-    if isinstance(dataset, Path):
-        dataset = ds.dataset(dataset, format='parquet')
+        # create a ParquetDataset object
+        parquet_dataset = pq.ParquetDataset(parquet_dataset)
 
-    if not isinstance(dataset, Dataset):
-        raise ValueError('dataset must be a PyArrow Dataset or path to a Parquet dataset')
-
-    # get the string columns
-    str_col_lst = [col.name for col in dataset.schema if "string" in str(col.type)]
-
-    return str_col_lst
-
-
-def get_file_max_len(pqt_file: Union[str, Path]) -> dict[str, int]:
-    """Get a list of maximum string lengths for a file by reading the metadata statistics"""
-    # get the table metadata
-    meta = pq.read_metadata(pqt_file)
-
-    # get a list of maximum lengths for every row group in the metadata
-    max_len_lst_lst = [get_row_group_max_lengths(meta.row_group(idx)) for idx in range(meta.num_row_groups)]
-
-    # zip the values into sets for each row
-    max_len_zipped_lst = [set(val for val in vals if val is not None) for vals in zip(*max_len_lst_lst)]
-
-    # get the maximum lengths in a single list of values
-    max_len_lst = [max(val) if len(val) > 0 else None for val in max_len_zipped_lst]
-
-    # create a dictionary of maximum lengths
-    max_len_dict = {nm: max_len for nm, max_len in zip(meta.schema.names, max_len_lst)}
-
-    return max_len_dict
+    return parquet_dataset
 
 
-def get_parquet_max_string_lengths(parquet_dataset: Union[str, Path]) -> dict[str, int]:
+def get_parquet_max_string_lengths(
+    parquet_dataset: Union[str, Path, pq.ParquetDataset]
+) -> dict[str, int]:
     """
-    For a Parquet datset, get the maximum string lengths for all string columns.
+    For a Parquet dataset, get the maximum string lengths for all string columns.
 
     Args:
         parquet_dataset: Path to Parquet dataset.
     """
-    # create a parquet dataset to work with
-    dataset = ds.dataset(parquet_dataset, format='parquet')
+    dataset = ensure_parquet_dataset(parquet_dataset)
 
-    # get maximum lengths for each column from the metadata for each file in the dataset
-    max_len_lst_lst = [list(get_file_max_len(fl).values()) for fl in dataset.files]
+    # identify string columns
+    string_columns = [
+        field.name for field in dataset.schema if pa.types.is_string(field.type)
+    ]
 
-    # zip the values into sets for each row
-    max_len_zipped_lst = [set(val for val in vals if val is not None) for vals in zip(*max_len_lst_lst)]
+    # initialize dictionary to store max lengths
+    max_lengths = {col: 0 for col in string_columns}
 
-    # get the maximum lengths in a single list of values
-    max_len_lst = [max(val) if len(val) > 0 else None for val in max_len_zipped_lst]
+    # initialize the reader
+    reader = dataset.read()
 
-    # create a dictionary of maximum lengths
-    max_len_dict = {nm: max_len for nm, max_len in zip(dataset.schema.names, max_len_lst)}
+    # iterate over string columns
+    for col in string_columns:
+        column = reader.column(col)
 
-    return max_len_dict
+        # iterate chunks in the column
+        for chunk in column.chunks:
+            max_len = max(
+                (len(str(val)) for val in chunk if val is not None), default=0
+            )
+            max_lengths[col] = max(max_lengths[col], max_len)
+
+    return max_lengths
 
 
-def get_geoparquet_bbox(parquet_dataset: Union[str, Path]) -> list[int]:
+def get_geoparquet_bbox(
+    parquet_dataset: Union[str, Path, pq.ParquetDataset]
+) -> list[int]:
     """For a Geoparquet dataset, get the full maximum bounding box."""
-    dataset = ds.dataset(parquet_dataset, format='parquet')
+    dataset = ensure_parquet_dataset(parquet_dataset)
 
     # get the explicitly added metadata for all the files
     meta_lst = [pq.read_metadata(fl).metadata for fl in dataset.files]
@@ -161,9 +155,6 @@ def get_geoparquet_bbox(parquet_dataset: Union[str, Path]) -> list[int]:
             "More than one spatial reference detected. Cannot convert data."
         )
 
-    # convert the geography definition back to a dictionary
-    uniq_geo = [json.loads(geo) for geo in geo_set][0]
-
     # get the bounding box for all the files, the entire parquet dataset
     coords_lst = list(
         zip(*[geo.get("columns").get("geometry").get("bbox") for geo in geo_lst])
@@ -176,3 +167,117 @@ def get_geoparquet_bbox(parquet_dataset: Union[str, Path]) -> list[int]:
     bbox = min_coords + max_coords
 
     return bbox
+
+
+def get_spatial_reference_projjson(
+    spatial_reference: Union[int, dict, "arcpy.SpatialReference"]
+) -> dict:
+    """
+    Get the PROJJSON representation of a Spatial Reference.
+
+    !!! note:
+
+        Spatial reference can be submitted as either an `arcpy.SpatialReference` object, dictionary with the
+        well known identifier (WKID) or the integer well known identifier. For instance, for WGS84, this can
+        be one of the following:
+
+        * `arcpy.SpatialReference(4326)`
+        * `{'wkid': 4326}`
+        * `4326`
+
+    Args:
+        spatial_reference: The spatial reference to get the PROJJSON for.
+    """
+    # late import arcpy to avoid dependency if not needed
+    import arcpy
+
+    # message if cannot figure out spatial reference
+    err_msg = (
+        "Cannot determine the spatial reference from the input, please provide either an arcpy.SpatialReference or"
+        "the well known identifier integer for the spatial reference."
+    )
+
+    # try to convert to string representation of a dict
+    if isinstance(spatial_reference, str):
+        try:
+            # try to load the spatial reference string to a dictionary
+            spatial_reference = json.loads(spatial_reference)
+
+        except ValueError:
+            raise ValueError(err_msg)
+
+    # if a dictionary, try to get the wkid out of it
+    if isinstance(spatial_reference, dict):
+        spatial_reference = int(spatial_reference.get("wkid"))
+
+        if spatial_reference is None:
+            raise ValueError(err_msg)
+
+    # if the spatial reference is a string representing a number, convert to an integer
+    if isinstance(spatial_reference, str) and spatial_reference.isnumeric():
+        spatial_reference = int(spatial_reference)
+
+    # create an ArcPy SpatialReference object from the wkid
+    if not isinstance(spatial_reference, arcpy.SpatialReference):
+        spatial_reference = arcpy.SpatialReference(spatial_reference)
+
+    # convert the spatial reference to the well known text representation
+    wkt2_str = spatial_reference.exportToString("WKT2")
+
+    # silence future warning, and ensure any issues encountered bubble up
+    osr.UseExceptions()
+
+    # use OSGeo to convert the spatial reference to PROJJSON from WKT2
+    srs = osr.SpatialReference()
+    srs.ImportFromWkt(wkt2_str)
+
+    prjson = json.loads(srs.ExportToPROJJSON())
+
+    return prjson
+
+
+def get_geoparquet_header(
+    geometry_type: Literal["Point", "LineString", "Polygon"],
+    encoding: Literal["WKB"] = "WKB",
+    spatial_reference: Union[int, dict, "arcpy.SpatialReference"] = 4326,
+    bounding_box: Optional[list[float]] = None,
+) -> dict:
+    # account for linestring alias
+    if geometry_type == "Line" or geometry_type == "Polyline":
+        geometry_type = "LineString"
+
+    # get the encoded spatial reference
+    sr_projjson = get_spatial_reference_projjson(spatial_reference)
+
+    # create the dictionary for the column
+    col_dict = {
+        "encoding": encoding,
+        "geometry_types": [geometry_type],
+        "crs": sr_projjson,
+    }
+
+    # if a bounding box is provided, ensure it is valid and add it to the column dictionary
+    if bounding_box is not None:
+        if not isinstance(bounding_box, list) or len(bounding_box) != 4:
+            raise ValueError(
+                "The bounding_box must be a list of four values: [minX, minY, maxX, maxY]"
+            )
+        if not all(isinstance(coord, (int, float)) for coord in bounding_box):
+            raise ValueError("All values in the bounding_box must be numeric.")
+        if bounding_box[0] > bounding_box[2]:
+            raise ValueError(
+                "The minX value must be less than the maxX value in the bounding_box."
+            )
+        if bounding_box[1] > bounding_box[3]:
+            raise ValueError(
+                "The minY value must be less than the maxY value in the bounding_box."
+            )
+        col_dict["bbox"] = bounding_box
+
+    gpqt_header = {
+        "version": "1.0.0",
+        "primary_column": "wkb",
+        "columns": {"wkb": col_dict},
+    }
+
+    return gpqt_header

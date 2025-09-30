@@ -5,132 +5,234 @@ easily be modified to support any testing framework.
 
 from pathlib import Path
 import sys
-import tempfile
 
 import arcpy
+import pandas as pd
 import pyarrow.parquet as pq
+import pytest
 
 
 # get paths to useful resources - notably where the src directory is
 self_pth = Path(__file__)
 dir_test = self_pth.parent
 dir_prj = dir_test.parent
+
 dir_src = dir_prj / "src"
 
-# insert the src directory into the path and import the projct package
+dir_data = dir_prj / "data"
+dir_smpl = dir_data / "sample"
+gdb_smpl = dir_smpl / "sample.gdb"
+
+# insert the src directory into the path and import the project package
 sys.path.insert(0, str(dir_src))
 import arcpy_parquet
 
-test_fc = Path(r"D:\projects\white-pass-skiing\data\interim\interim.gdb\ski_runs_wgs84")
+# set up logging
+logger = arcpy_parquet.utils.get_logger(logger_name=Path(__file__).stem)
 
 
-def test_feature_class_to_parquet():
-
-    tmp_pqt = Path(tempfile.gettempdir()) / "test.parquet"
-
-    out_pqt = arcpy_parquet.feature_class_to_parquet(test_fc, tmp_pqt)
-
-    assert out_pqt.exists()
-
-    pqt_ds = pq.ParquetDataset(tmp_pqt, use_legacy_dataset=False)
-    assert "wkb" in pqt_ds.schema.names
+def get_parquet_columns(parquet_dataset: Path) -> list[str]:
+    """Get list of column names for a Parquet dataset"""
+    # create arrow dataset object if a path
+    dataset = pq.ParquetDataset(parquet_dataset)
+    return dataset.schema.names
 
 
-def test_feature_class_to_parquet_countries():
+def validate_columns(
+    parquet_dataset: Path,
+    expected_columns: list[str],
+    exclude_columns: list[str] = None,
+) -> None:
+    """Validate that a Parquet dataset has the expected columns"""
+    cols = get_parquet_columns(parquet_dataset)
 
-    countries_fc = r"D:\projects\ba-data-engineering\data\raw\MBR_Countries_World_raw.gdb\MBR_Countries_World_raw_1022"
-    out_pqt = (
-        r"D:\projects\ba-data-engineering\data\external\countries_mbr_raw_2023.parquet"
+    for col in expected_columns:
+        assert col in cols
+
+    if exclude_columns is not None:
+        for col in exclude_columns:
+            assert col not in cols
+
+
+def validate_partitioning(
+    parquet_dataset: Path, expected_partitions: list[str]
+) -> None:
+    """Validate that a Parquet dataset has the expected partitioning"""
+    dataset = pq.ParquetDataset(parquet_dataset)
+    parts = dataset.partitioning.schema.names
+
+    if isinstance(expected_partitions, str):
+        expected_partitions = [expected_partitions]
+
+    for part in expected_partitions:
+        assert part in parts
+
+
+# data paths
+features_poly = gdb_smpl / "wa_h3_09"
+features_pt = gdb_smpl / "wa_h3_09_centroids"
+
+
+@pytest.mark.parametrize(
+    "input_features,output_format,expected_columns,exclude_columns,partition_columns",
+    [
+        (features_poly, "WKB", ["h3_index", "h3_06"], ["SHAPE"], None),
+        (features_poly, "WKB", ["h3_index", "h3_06"], ["SHAPE"], ["h3_06"]),
+        (
+            features_poly,
+            "XY",
+            ["h3_index", "h3_06", "geometry_X", "geometry_Y"],
+            ["SHAPE"],
+            None,
+        ),
+        (features_pt, "WKB", ["h3_index", "h3_06"], ["SHAPE"], None),
+        (features_pt, "WKB", ["h3_index", "h3_06"], ["SHAPE"], ["h3_06"]),
+        (
+            features_pt,
+            "XY",
+            ["h3_index", "h3_06", "geometry_X", "geometry_Y"],
+            ["SHAPE"],
+            None,
+        ),
+    ],
+    ids=[
+        "polygon WKB no partition",
+        "polygon WKB with partition",
+        "polygon XY no partition",
+        "point WKB no partition",
+        "point WKB with partition",
+        "point XY no partition",
+    ],
+)
+def test_feature_class_to_parquet(
+    input_features,
+    output_format,
+    expected_columns,
+    exclude_columns,
+    partition_columns,
+    tmp_pqt,
+):
+    res = arcpy_parquet.feature_class_to_parquet(
+        input_table=input_features,
+        output_parquet=tmp_pqt,
+        partition_columns=partition_columns,
+        include_geometry=True,
+        geometry_format=output_format,
+        batch_size=300000,
     )
-
-    res = arcpy_parquet.feature_class_to_parquet(Path(countries_fc), Path(out_pqt))
-
     assert res.exists()
-
-
-def test_parquet_to_feature_class_basemaps():
-    import arcpy
-
-    arcpy.env.overwriteOutput = True
-    in_pqt = Path(
-        r"D:\projects\ba-data-engineering\data\processed\delivery\foursquare_basemaps.parquet"
+    validate_columns(
+        res, expected_columns=expected_columns, exclude_columns=exclude_columns
     )
-    out_fc = Path(
-        r"D:\projects\ba-data-engineering\data\processed\delivery\foursquare_basemaps_devsummit.gdb\places"
-    )
-    schma_csv = Path(
-        r"D:\projects\ba-data-engineering\data\processed\delivery\foursquare_basemaps_schema.csv"
-    )
-    res = arcpy_parquet.parquet_to_feature_class(
-        in_pqt,
-        output_feature_class=out_fc,
-        schema_file=schma_csv,
-        build_spatial_index=True,
-    )[0]
-    assert out_fc.exists()
+    if partition_columns is not None:
+        validate_partitioning(res, expected_partitions=partition_columns)
+
+# parquet data with coordinates
+coord_pqt = dir_smpl / "main_fgdb_sample/parquet"
+coord_schm = dir_smpl / "main_fgdb_sample/schema"
+coord_cols = ["longitude", "latitude"]
 
 
 def test_parquet_to_feature_class_coordinates(tmp_gdb):
-    in_pqt = Path(r"D:\projects\foursquare-processing\data\sample\coordinate_data")
-    out_fc = tmp_gdb / "test_coordinates"
+    out_fc = tmp_gdb / "main_fgdb_sample"
+    logger.info(f'output features path: {out_fc}')
+
+    in_tbl = pq.ParquetDataset(coord_pqt).read()
+    in_cnt = in_tbl.num_rows
+    logger.info(f'Input row count: {in_cnt:,}')
+
     res = arcpy_parquet.parquet_to_feature_class(
-        in_pqt,
-        out_fc,
-        geometry_type="COORDINATES",
-        geometry_column=["longitude", "latitude"],
-    )
-    assert arcpy.Exists(str(out_fc))
-    assert int(arcpy.management.GetCount(str(out_fc))[0]) > 0
-
-
-def test_parquet_to_feature_class_foursquare_melbourne():
-    import arcpy
-
-    arcpy.env.overwriteOutput = True
-    in_pqt = Path(
-        r"D:\projects\foursquare-melbourne202312\data\raw\foursquare_vic_extract_20240205\parquet"
-    )
-    out_fc = Path(
-        r"D:\projects\foursquare-melbourne202312\data\interim\interim.gdb\foursquare_vic_extract_20240205"
-    )
-    schma_csv = [f for f in (in_pqt.parent / "schema").glob("*.csv")][0]
-    res = arcpy_parquet.parquet_to_feature_class(
-        in_pqt,
+        parquet_path=coord_pqt,
         output_feature_class=out_fc,
-        schema_file=schma_csv,
-        geometry_type="POINT",
-        build_spatial_index=True,
+        geometry_column=coord_cols,
+        geometry_type="COORDINATES",
+        spatial_reference=4326,
     )
-    assert arcpy.Exists(str(out_fc))
-    assert int(arcpy.management.GetCount(str(out_fc))[0]) > 0
+
+    assert arcpy.Exists(str(res))
+    assert arcpy.Describe(str(res)).shapeType == "Point"
+
+    out_cnt = int(arcpy.management.GetCount(str(res)).getOutput(0))
+    assert in_cnt == out_cnt
+
+
+def test_parquet_to_feature_class_coordinates_schema(tmp_gdb):
+    out_fc = tmp_gdb / "main_fgdb_sample_scheama"
+    logger.info(f'Output features path: {out_fc}')
+
+    in_tbl = pq.ParquetDataset(coord_pqt).read()
+    in_cnt = in_tbl.num_rows
+    logger.info(f'Input row count: {in_cnt:,}')
+
+    res = arcpy_parquet.parquet_to_feature_class(
+        parquet_path=coord_pqt,
+        output_feature_class=out_fc,
+        schema_file=coord_schm,
+        geometry_column=coord_cols,
+        geometry_type="COORDINATES",
+        spatial_reference=4326,
+    )
+
+    assert arcpy.Exists(str(res))
+    assert arcpy.Describe(str(res)).shapeType == "Point"
+
+    out_cnt = int(arcpy.management.GetCount(str(res)).getOutput(0))
+    assert in_cnt == out_cnt
+
+
+def test_parquet_to_feature_class_coordinates_no_schema(tmp_gdb):
+    out_fc = tmp_gdb / "main_fgdb_sample"
+    logger.info(f'Output features path: {out_fc}')
+
+    in_tbl = pq.ParquetDataset(coord_pqt).read()
+    in_cnt = in_tbl.num_rows
+    logger.info(f'Input row count: {in_cnt:,}')
+
+    res = arcpy_parquet.parquet_to_feature_class(
+        parquet_path=coord_pqt,
+        output_feature_class=out_fc,
+        geometry_column=coord_cols,
+        geometry_type="COORDINATES",
+        spatial_reference=4326,
+    )
+
+    assert arcpy.Exists(str(res))
+    assert arcpy.Describe(str(res)).shapeType == "Point"
+
+    out_cnt = int(arcpy.management.GetCount(str(res)).getOutput(0))
+    assert in_cnt == out_cnt
+
+
+def test_parquet_to_feature_class_geoparquet(tmp_gdb):
+    assert False, "Not implemented yet"
+
+
+def test_parquet_to_feature_class_geoparquet_schema(tmp_gdb):
+    assert False, "Not implemented yet"
 
 
 def test_parquet_to_feature_class_h3(tmp_gdb):
-    in_pqt = Path(r"D:\projects\density-anomalies\data\raw\anomaly\popularity\parquet")
-    out_fc = tmp_gdb / "popularity_anomalies"
-    res = arcpy_parquet.parquet_to_feature_class(
-        in_pqt,
-        output_feature_class=out_fc,
-        geometry_type="H3",
-        geometry_column="esri_h3_09",
-        build_spatial_index=True,
-    )
-    assert arcpy.Exists(str(out_fc))
-    assert int(arcpy.management.GetCount(str(out_fc))[0]) > 0
+    assert False, "Not implemented yet"
 
 
-def test_parquet_to_feature_class_coordinates_popularity_poi():
-    in_pqt = Path(
-        r"D:\projects\density-anomalies\data\raw\anomaly\popularity_retail_poi\parquet"
+def test_get_parquet_max_string_lengths(tmp_gdb):
+    """Test getting max string lengths from a Parquet dataset"""
+    res = arcpy_parquet.utils.parquet.get_parquet_max_string_lengths(coord_pqt)
+    assert isinstance(res, dict)
+    assert all(isinstance(k, str) for k in res.keys())
+    assert all(v is None or isinstance(v, int) for v in res.values())
+    assert all(v is None or v > 0 for v in res.values())
+    assert set(res.keys()) == set(coord_cols)
+
+
+def test_create_schema_file_parquet(tmp_dir):
+    """Test creating a schema file from a Parquet dataset"""
+    schema_pth = tmp_dir / "schema.csv"
+    res = arcpy_parquet.create_schema_file(
+        input_dataset=coord_pqt, output_schema_file=schema_pth
     )
-    out_fc = Path(
-        r"D:\projects\density-anomalies\data\interim\interim.gdb\anomaly_popularity_retail"
-    )
-    res = arcpy_parquet.parquet_to_feature_class(
-        in_pqt,
-        out_fc,
-        geometry_type="COORDINATES",
-        geometry_column=["longitude", "latitude"],
-    )
-    assert arcpy.Exists(str(out_fc))
-    assert int(arcpy.management.GetCount(str(out_fc))[0]) > 0
+    assert res.exists()
+    assert res.stat().st_size > 0
+
+    df = pd.read_csv(schema_pth)
+    assert(len(df.index) > 0)
