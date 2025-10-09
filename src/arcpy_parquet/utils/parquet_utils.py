@@ -1,10 +1,15 @@
 from pathlib import Path
 import json
 from osgeo import osr
-from typing import Union, Literal, Optional, LiteralString
+from typing import Union, Literal, Optional
 
 import pyarrow as pa
 import pyarrow.parquet as pq
+
+from arcpy_parquet.utils import get_logger
+
+# set up logging
+logger = get_logger(logger_name="arcpy_parquet.utils.parquet", level="DEBUG")
 
 # template for the geoparquet metadata
 _template = {
@@ -65,6 +70,54 @@ _template = {
 }
 
 
+def validate_parquet_path(parquet_path: Union[str, Path]) -> Path:
+    """Validate the input Parquet path exists and is a directory."""
+    # if a string, make into a path
+    if isinstance(parquet_path, str):
+        parquet_path = Path(parquet_path)
+
+    # ensure will not encounter unexpected results based on incompatible input parameter or parameter combinations
+    if not parquet_path.exists():
+        raise ValueError(
+            f"Cannot locate the input path {parquet_path}. Please double check to ensure the path is "
+            f"correct and reachable."
+        )
+
+    elif parquet_path.is_dir():
+        # get all the parquet part files to start with
+        pqt_prts = [prt for prt in parquet_path.rglob("*.parquet")]
+
+        # now, filter based on parts being part of string - enables to specify nested partition
+        if isinstance(parquet_partitions, list):
+            for partition in parquet_partitions:
+                pqt_prts = [prt for prt in pqt_prts if partition in str(prt)]
+
+        # if a list is not provided, throw a fit
+        elif parquet_partitions is not None:
+            raise ValueError("parquet_partitions must be a list")
+
+        # ensure we have part files still left to work with
+        assert len(pqt_prts) > 0, (
+            "The provided directory and partitions do not appear to contain any parquet "
+            "part files."
+        )
+    elif (
+        parquet_path.is_file()
+        and parquet_partitions is not None
+        or len(parquet_partitions) > 0
+    ):
+        raise ValueError(
+            "If providing a parquet part file, you cannot specify a parquet partition."
+        )
+
+    else:
+        raise ValueError(
+            "parquet_path must be either a directory for parquet data or a specific part file."
+        )
+
+    return parquet_path
+
+
 def ensure_parquet_dataset(
     parquet_dataset: Union[str, Path, pq.ParquetDataset]
 ) -> pq.ParquetDataset:
@@ -88,7 +141,8 @@ def ensure_parquet_dataset(
 
 
 def get_parquet_max_string_lengths(
-    parquet_dataset: Union[str, Path, pq.ParquetDataset]
+    parquet_dataset: Union[str, Path, pq.ParquetDataset],
+    string_columns: Optional[list[str]] = None,
 ) -> dict[str, int]:
     """
     For a Parquet dataset, get the maximum string lengths for all string columns.
@@ -96,6 +150,7 @@ def get_parquet_max_string_lengths(
     Args:
         parquet_dataset: Path to Parquet dataset.
     """
+    logger.info("Introspectively determining maximum string lengths.")
     dataset = ensure_parquet_dataset(parquet_dataset)
 
     # identify string columns

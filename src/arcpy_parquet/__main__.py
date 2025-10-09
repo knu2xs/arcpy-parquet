@@ -12,9 +12,10 @@ import arcpy
 import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
+from tqdm import tqdm
 
-from arcpy_parquet.utils import get_logger
-from arcpy_parquet.utils.parquet import (
+from arcpy_parquet.utils import get_logger, pyarrow_utils
+from arcpy_parquet.utils.parquet_utils import (
     get_geoparquet_header,
     get_parquet_max_string_lengths,
 )
@@ -40,7 +41,7 @@ geom_dict = {
     "MULTIPOINT Z": ("MULTIPOINT", "DISABLED", "ENABLED"),
 }
 
-# mapping data types for going from parquet to a feature class
+# mapping data types for going from pyarrow to a feature class
 import_dtype_dict = {
     "int8": "INTEGER",
     "int16": "INTEGER",
@@ -329,49 +330,6 @@ def feature_class_to_parquet(
     return output_parquet
 
 
-def get_partition_lst(dir_pth: Path) -> List[str]:
-    """
-    Helper function to get the directories matching the partitioning pattern.
-    Args:
-        dir_pth: Path to directory.
-
-    Returns:
-        List of directory names for child partitions.
-    """
-    return [p.stem for p in dir_pth.glob("*=*") if p.is_dir() and p.stem]
-
-
-def get_partition_column(pqt_prt: str) -> str:
-    """
-    Helper function to get parquet partition column names from directory path string
-    separated by equals(``=``).
-
-    Args:
-        pqt_prt: Parquet partition directory string name.
-
-    Returns:
-        Column name and partition_column_list to use.
-    """
-    col_nm = tuple(pqt_prt.split("="))[0]
-    return col_nm
-
-
-def get_available_partitions(pqt_pth: Path) -> Tuple[str, ...]:
-    """
-    Helper function to get a list of partition columns used.
-
-    Args:
-        pqt_pth: Path to parquet data_dir.
-
-    Returns:
-        Tuple of any partitioned columns.
-    """
-    pqt_pth = pqt_pth if isinstance(pqt_pth, Path) else Path(pqt_pth)
-    pqt_cols = tuple(set(str(p) for p in pqt_pth.glob("**/*=*") if p.is_dir()))
-
-    return pqt_cols
-
-
 def h3_index_to_geometry(h3_index: str, geometry_type: Optional[str] = "polygon"):
     """
     Create an ``arcpy.Geometry`` object from a hexadecimal H3 index.
@@ -455,10 +413,12 @@ def h3_index_to_geometry(h3_index: str, geometry_type: Optional[str] = "polygon"
 def parquet_to_feature_class(
     parquet_path: Path,
     output_feature_class: Path,
-    schema_file: Path = None,
-    geometry_type: Optional[Literal["GEOPARQUET", "COORDINATES", "H3"]] = "GEOPARQUET",
-    parquet_partitions: Optional[List[str]] = None,
-    geometry_column: Union[List[str], str] = "wkb",
+    schema_file: Optional[Path] = None,
+    geometry_format: Optional[
+        Literal["GEOPARQUET", "COORDINATES", "H3"]
+    ] = "GEOPARQUET",
+    parquet_partitions: Optional[str] = None,
+    geometry_column: Optional[Union[List[str], str]] = None,
     spatial_reference: Union[arcpy.SpatialReference, str, int] = 4326,
     sample_count: Optional[int] = None,
     build_spatial_index: bool = True,
@@ -475,17 +435,18 @@ def parquet_to_feature_class(
         parquet_path: The directory or Parquet part file to convert.
         output_feature_class: Where to save the new Feature Class.
         schema_file: CSV file with detailed schema properties.
-        geometry_type: ``POINT``, ``COORDINATES``, ``H3`` ``POLYLINE``, or ``POLYGON`` describing the geometry type.
-            Default is ``COORDINATES``. ``COORDINATES``, is a point geometry type described by two coordinate columns.
-            ``H3`` is a column containing H3 indices as hexadecimal strings. Polygon geometries will be created based
-            on the H3 indices for the rows.
-        parquet_partitions: Partition name and values, if available, to select. For instance,
-            if partitioned by country column using ISO2 identifiers, select Mexico using
-            ``country=mx``.
-        geometry_column: Column from parquet table containing the geometry encoded as WKB. Default
-            is ``wkb``. If the geometry type is ``COORDINATES``, this must be an iterable (tuple or list) of
-            the x (longitude) and y (latitude) columns containing the coordinates.
-        spatial_reference: Spatial reference of input data. Default is WGS84 (WKID: 4326).
+        geometry_format: `GEOPARQUET`, `COORDINATES` or `H3` describing the geometry type. `COORDINATES`, is a point
+            geometry type described by two coordinate columns. `H3` is a column containing H3 indices as hexadecimal
+            strings. Polygon geometries will be created based on the H3 indices for the rows. Default is `GEOPARQUET`.
+        parquet_partitions: Hive partition name and values, if available, to select. For instance,
+            if partitioned year and month with year=2023 and month=01, this would be year=2023/month=01.
+        geometry_column: If the geometry type is `GEOPARQUET', this parameter will be ignored. If the geometry type
+            is ``COORDINATES``, this must be an iterable (tuple or list) of the x (longitude) and y (latitude)
+            columns containing the coordinates.
+        spatial_reference: Spatial reference of input data. Default is WGS84 (WKID: 4326). If the geometry type
+            is `GEOPARQUET`, this parameter will be ignored if the spatial reference is available in the parquet
+            metadata. However, if the metadata is missing or incomplete, this parameter will be used to define the
+            spatial reference.
         sample_count: If only wanting to import enough data to understand the schema, specify
             the count of records with this parameter. If left blank, will import all records.
         build_spatial_index: Optional if desired to build the spatial index once inserting all the data.
@@ -495,8 +456,17 @@ def parquet_to_feature_class(
     # if used as a tool in pro, let user know what is going on...kind of
     arcpy.SetProgressorLabel("Warming up the Flux Capacitor...")
 
+    # ensure geometry format is uppercase for comparisons
+    geometry_format = geometry_format.upper()
+
+    # ensure goemtry format is valid
+    if geometry_format not in ("GEOPARQUET", "COORDINATES", "H3"):
+        raise ValueError(
+            f'geometry_format must be one of ["GEOPARQUET", "COORDINATES", "H3"]. You provided "{geometry_format}".'
+        )
+
     # ensure coordinates are provided if using COORDINATES geometry type
-    if geometry_type == "COORDINATES" and not isinstance(
+    if geometry_format == "COORDINATES" and not isinstance(
         geometry_column, (tuple, list)
     ):
         raise ValueError(
@@ -514,80 +484,135 @@ def parquet_to_feature_class(
         else Path(output_feature_class)
     )
 
-    # ensure will not encounter unexpected results based on incompatible input parameter or parameter combinations
-    if not parquet_path.exists():
-        raise ValueError(
-            f"Cannot locate the input path {parquet_path}. Please double check to ensure the path is "
-            f"correct and reachable."
-        )
-
-    elif parquet_path.is_dir():
-        # get all the part files to start with
-        pqt_prts = [prt for prt in parquet_path.rglob("part-*.parquet")]
-
-        # now, filter based on parts being part of string - enables to specify nested partition
-        if isinstance(parquet_partitions, list):
-            for partition in parquet_partitions:
-                pqt_prts = [prt for prt in pqt_prts if partition in str(prt)]
-
-        # if a list is not provided, throw a fit
-        elif parquet_partitions is not None:
-            raise ValueError("parquet_partitions must be a list")
-
-        # ensure we have part files still left to work with
-        assert len(pqt_prts) > 0, (
-            "The provided directory and partitions do not appear to contain any parquet "
-            "part files."
-        )
-    elif parquet_path.is_file() and parquet_partitions is not None or len(parquet_partitions) > 0:
-        raise ValueError("If providing a parquet part file, you cannot specify a parquet partition.")
-
-    else:
-        raise ValueError(
-            "parquet_path must be either a directory for parquet data or a specific part file."
-        )
-
     # create a PyArrow Dataset to read from
     dataset = pq.ParquetDataset(parquet_path, use_legacy_dataset=False)
+    # dataset = ds.dataset(parquet_path, format="parquet")
 
-    # extract the spatial reference from the parquet metadata if using geoparquet
-    if geometry_type == "GEOPARQUET":
-        # get the geometry information from the parquet metadata if available
-        geo_str = dataset.schema.metadata.get(b"geo")
+    # get the list of available partitions in the parquet data
+    available_partitions = pyarrow_utils.get_partition_dicts(dataset)
 
-        # if no geometry metadata, raise an error
-        if geo_str is None:
+    # if parquet partitions were provided, but not available in the data, raise an error
+    if parquet_partitions is not None and len(available_partitions) == 0:
+        raise ValueError(
+            "The provided parquet_partitions do not appear to be available in the input data. "
+            "The input data does not appear to be partitioned."
+        )
+
+    # if parquet partitions were provided, ensure they are valid
+    elif parquet_partitions is not None:
+        # split partition string into a list (using Path enables both forward and back slashes)
+        partition_parts = (prt.split("=") for prt in Path(parquet_partitions).parts)
+
+        # create a dictionary of the partition parts
+        partition_dict = {k: v for k, v in partition_parts}
+
+        if partition_dict not in available_partitions:
             raise ValueError(
-                "The input parquet data does not appear to be formatted as Geoparquet. "
-                "No geometry metadata was found."
+                f"The provided parquet_partitions do not appear to be available in the input data. "
+                f"Available partitions include: "
+                f"{', '.join(pyarrow_utils.partition_path_from_dict(p) for p in available_partitions)}"
             )
 
-        # get the geometry metadata as a dictionary
-        geo_dict = json.loads(geo_str.decode("utf-8"))
+        # create a filter expression from the provided partition dictionary
+        fltr = pyarrow_utils.get_partition_expression(partition_dict)
 
-        # get the geometry column
+        # filter the dataset to only the specified partitions
+        dataset = pq.ParquetDataset(
+            parquet_path, filters=fltr, use_legacy_dataset=False
+        )
+
+    # get a dictionary for handling the schema properties
+    schema_dict = pyarrow_utils.get_schema_dict(dataset.schema)
+
+    # check the schema for any columns with complex data types
+    complex_cols = pyarrow_utils.get_complex_columns(dataset)
+
+    # if any complex columns, create a table with just those columns to interrogate
+    if len(complex_cols) > 0:
+        # initialize dictionary to store max lengths
+        complex_max_lengths = {col: 0 for col in complex_cols}
+
+        # initialize the reader
+        reader = dataset.read(columns=complex_cols)
+
+        # iterate over string columns
+        for col in complex_cols:
+            column = reader.column(col)
+
+            # iterate chunks in the column
+            for chunk in column.chunks:
+                max_len = max(
+                    (
+                        len(str(val))
+                        for val in pa.array(
+                            [str(x.as_py()) for x in chunk], type=pa.string()
+                        )
+                        if val is not None
+                    ),
+                    default=0,
+                )
+                complex_max_lengths[col] = max(complex_max_lengths[col], max_len)
+
+        # update the schema dictionary with the max lengths and data type (string) for complex columns
+        for complex_col in complex_cols:
+            old_val = schema_dict.get(complex_col)
+            new_val = {
+                "arcpy_name": old_val.get("arcpy_name"),
+                "arcpy_type": "string",
+                "type": "string",
+                "length": complex_max_lengths.get(complex_col),
+            }
+            schema_dict[complex_col] = new_val
+
+    # extract the spatial reference from the parquet metadata if using geoparquet
+    if geometry_format == "GEOPARQUET":
+        # get the geometry information from the parquet metadata if available
+        geo_dict = pyarrow_utils.get_geoparquet_metadata(dataset.schema)
+
+        # get the geometry type for the output feature class and the cursor geometry token
+        geom_typ = pyarrow_utils.get_geometry_type(geo_dict)
+
+        # get the primary geometry column name
         geometry_column = geo_dict.get("primary_column")
+        pa_cursor_geom = (
+            geometry_column  # TODO: support other optional geometry columns
+        )
 
-        # get the geometry column metadata
-        col_meta = geo_dict.get("columns").get(geometry_column)
+        # set the cursor geometry token
+        arcpy_cursor_geom = "SHAPE@WKB"
 
-        # extract the geometry type from the metadata
-        geometry_type = col_meta.get("geometry_type").upper()
+        # get the spatial reference from the metadata if available
+        spatial_reference = pyarrow_utils.get_spatial_reference(geo_dict)
 
-        # account for line type names difference
-        if geometry_type == "LINESTRING":
-            geometry_type = "POLYLINE"
+        # remove any geometry columns from the schema dictionary so they don't get added as fields
+        for geom_col in pyarrow_utils.get_geometry_columns(geo_dict):
+            if geom_col in schema_dict:
+                schema_dict.pop(geom_col)
 
-        # extract the spatial reference from the metadata if available
-        if col_meta.get("crs") is not None:
-            spatial_reference = arcpy.SpatialReference(col_meta.get("crs"))
+    # set the geometry type and cursor geometry token for H3
+    elif geometry_format == "H3":
+        geom_typ = "POLYGON"
+        pa_cursor_geom = [geometry_column]
+        arcpy_cursor_geom = "SHAPE@WKB"
 
-    # create a spatial reference object if needed
-    if isinstance(spatial_reference, (int, str)):
-        spatial_reference = arcpy.SpatialReference(spatial_reference)
+        # ensure the geometry column is in the input data
+        if geometry_column not in dataset.schema.names:
+            raise ValueError(
+                "The geometry_column does not appear to be in the input parquet columns."
+            )
 
-    # slightly change how column names are handled if using coordinates or h3
-    if isinstance(geometry_column, (tuple, list)):
+    # if working with coordinates, set the geometry type to points, set the cursor geometry token and validate
+    elif geometry_format == "COORDINATES":
+        geom_typ = "POINT"
+        pa_cursor_geom = list(geometry_column)
+        arcpy_cursor_geom = "SHAPE@XY"
+
+        if not isinstance(geometry_column, (tuple, list)) or len(geometry_column) != 2:
+            raise ValueError(
+                "If using COORDINATES as the geometry type, you must provide an iterable (list or tuple) "
+                "of the x and y column names for the coordinates."
+            )
+
         # ensure coordinate columns are in input data
         if (
             geometry_column[0] not in dataset.schema.names
@@ -598,63 +623,64 @@ def parquet_to_feature_class(
                 f"the input parquet columns."
             )
 
-        # get a list of the string column types and field aliases from parquet
-        col_typ_lst, attr_alias_lst = zip(
-            *[
-                (str(c.type.value_type), c.name)
-                if isinstance(c.type, pa.DictionaryType)
-                else (str(c.type), c.name)
-                for c in dataset.schema
-                # if c.name not in geometry_column  # geometry columns get dropped
-            ]
-        )
+        # ensure the coordinate columns are numeric types
+        for coord_col in geometry_column:
+            col_type = str(next(c.type for c in dataset.schema if c.name == coord_col))
+            if col_type not in (
+                "int8",
+                "int16",
+                "int32",
+                "int64",
+                "float",
+                "double",
+                "decimal",
+            ):
+                raise ValueError(
+                    f"The geometry_column '{coord_col}' does not appear to be a numeric type. "
+                    "Coordinate columns must be one of the following types: "
+                    "int8, int16, int32, int64, float, double, or decimal."
+                )
 
-    else:
-        # ensure geometry column is in input data
-        if geometry_column not in dataset.schema.names:
-            raise ValueError(
-                "The geometry_column does not appear to be in the input parquet columns."
-            )
+    # if spatial reference is a WKID create a spatial reference object
+    if isinstance(spatial_reference, str) and spatial_reference.isnumeric():
+        spatial_reference = int(spatial_reference)
 
-        # get a list of the string column types and field aliases from parquet
-        col_typ_lst, attr_alias_lst = zip(
-            *[
-                (str(c.type.value_type), c.name)
-                if isinstance(c.type, pa.DictionaryType)
-                else (str(c.type), c.name)
-                for c in dataset.schema
-                if c.name not in geometry_column
-            ]
-        )
+    if isinstance(spatial_reference, int):
+        spatial_reference = arcpy.SpatialReference(spatial_reference)
 
-    # prepend any column names starting with a number with an 'c' and save as the field names
-    attr_nm_lst = [f"c{c}" if c[0].isdigit() else c for c in attr_alias_lst]
+    # hydrate the property dictionary to use when adding fields
+    prop_dict_lst = []
 
-    # use these to map to esri field types
-    fld_typ_lst = [import_dtype_dict[typ] for typ in col_typ_lst]
-
-    # check for really strange and uncaught error in naming
-    if output_feature_class.name.lower().startswith("delta"):
-        raise ValueError('Feature Class name cannot start with "delta".')
-
-    # create the new feature class
-    arcpy.management.CreateFeatureclass(
-        out_path=str(output_feature_class.parent),
-        out_name=output_feature_class.name,
-        geometry_type=geom_dict[geometry_type][0],
-        spatial_reference=spatial_reference,
-        has_m=geom_dict[geometry_type][1],
-        has_z=geom_dict[geometry_type][2],
-    )
-
-    logger.info(f"Created feature class at {str(output_feature_class)}")
-
-    # if a schema file is not provided read from the input data
+    # if a schema file is not provided read from the input data, introspect string lengths
     if schema_file is None:
         # get the maximum string lengths from the parquet data for use in field creation
-        schema_dict = get_parquet_max_string_lengths(dataset)
+        max_len_dict = get_parquet_max_string_lengths(dataset)
 
-    # if a schema file is provided as part of input, load it to a dict using Pandas because it's easy
+        # iterate the schema dictionary to create field property dictionaries for building the feature class
+        for nm, prop in schema_dict.items():
+            # get the field type from the mapping dictionary, defaulting to text if not found
+            fld_typ = pyarrow_utils.import_dtype_dict.get(prop["type"], "TEXT")
+
+            # create the property dictionary for adding a field
+            prop_dict = dict(
+                field_name=prop.get("arcpy_name"),
+                field_type=fld_typ,
+                field_alias=nm,
+                field_is_nullable="NULLABLE",
+            )
+
+            # if the field type is text, add length to the property dictionary
+            if fld_typ == "TEXT":
+                # get the introspected length if available, defaulting to 512 if not found
+                fld_len = max_len_dict.get(nm, 512)
+
+                # create the property dictionary for adding a text field
+                prop_dict["field_length"] = int(fld_len)
+
+            # append the property dictionary to the list
+            prop_dict_lst.append(prop_dict)
+
+    # if a schema file is provided, use it to build the field properties
     else:
         # if a directory for the schema is provided, get the enclosed csv file
         if schema_file.is_dir() and schema_file.stem == "schema":
@@ -664,95 +690,108 @@ def parquet_to_feature_class(
                 schema_file = csv_lst[0]
 
         # read the csv into a Pandas DataFrame
-        schema_df = pd.read_csv(schema_file)
+        schema_df = pd.read_csv(
+            schema_file,
+            usecols=["field_name", "field_alias", "field_length", "field_type"],
+        )
 
         # swap out the string types for text so add field works
-        schema_df.loc[schema_df["field_type"] == "String", "field_type"] = "TEXT"
+        schema_df.loc[
+            (schema_df["field_type"].str.lower() == "string")
+            | (schema_df["field_type"].str.lower() == "str"),
+            "field_type",
+        ] = "TEXT"
 
-        # dump to a dict
-        schema_dict = {
-            k: v for k, v in zip(schema_df["field_name"], schema_df.to_dict("records"))
+        # get a list of string fields without a length defined
+        schema_string_cols = [
+            col.name
+            for col in dataset.schema
+            if str(col.type) in ("string", "utf8", "long_string", "long_utf8")
+        ]
+        missing_len_fld_lst = [
+            col
+            for col in schema_string_cols
+            if col not in list(schema_df["field_name"])
+        ]
+
+        if len(missing_len_fld_lst) > 0:
+            logger.warning(
+                f"The following string fields do not have a length defined in the schema file and will default to "
+                f"512 characters: {', '.join(missing_len_fld_lst)}"
+            )
+
+        # create a dictionary of properties read from the csv file
+        csv_dict = {
+            r.field_name: {"length": r.field_length, "alias": r.field_alias}
+            for r in schema_df.itertuples()
         }
 
-    # iteratively add columns using the introspected field name, alias, and type
-    for nm, alias, typ in zip(attr_nm_lst, attr_alias_lst, fld_typ_lst):
-        # if the field name exists in the dictionary, peel off a single field's properties and add a field using them
-        if nm in schema_dict.keys():
-            prop_dict = schema_dict.pop(nm)
+        # iterate the schema dictionary to create field property dictionaries for building the feature class
+        for nm, prop in schema_dict.items():
+            # get the field type from the mapping dictionary, defaulting to text if not found
+            fld_typ = pyarrow_utils.import_dtype_dict.get(prop["type"], "TEXT")
 
-            # handle if field properties are just a numeric string length introspected from parquet metadata
-            if isinstance(prop_dict, int):
-                prop_dict = dict(
-                    field_name=nm,
-                    field_type=typ,
-                    field_length=int(prop_dict),
-                    field_alias=alias,
-                    field_is_nullable="NULLABLE",
-                )
-
-            arcpy.management.AddField(in_table=str(output_feature_class), **prop_dict)
-
-            # for logging progress
-            log_dict = dict()
-            log_dict["in_table"] = str(output_feature_class)
-            log_dict = {**log_dict, **prop_dict}
-
-        # otherwise, add based on introspected properties
-        else:
-            arcpy.management.AddField(
-                in_table=str(output_feature_class),
-                field_name=nm,
-                field_type=typ,
-                field_length=512,
-                field_alias=alias,
+            # create the property dictionary for adding a field
+            prop_dict = dict(
+                field_name=prop.get("arcpy_name"),
+                field_type=fld_typ,
+                field_alias=csv_dict.get(nm, {}).get("alias", nm),
                 field_is_nullable="NULLABLE",
             )
 
-            # for logging progress
-            log_dict = dict(
-                in_table=str(output_feature_class),
-                field_name=nm,
-                field_type=typ,
-                field_length=512,
-                field_alias=alias,
-                field_is_nullable="NULLABLE",
-            )
+            # if the field type is text, add length to the property dictionary
+            if fld_typ == "TEXT":
+                # get the length from the csv if available, defaulting to 512 if not found
+                fld_len = csv_dict.get(nm, {}).get("length", 512)
 
-        # log progress
-        logger.info(f"Field added to Feature Class {log_dict}")
+                # create the property dictionary for adding a text field
+                prop_dict["field_length"] = int(fld_len)
 
-    # if any fields are defined in the schema file still left over, add them
-    for nm in schema_dict.keys():
-        arcpy.management.AddField(
-            in_table=str(output_feature_class), **schema_dict.get(nm)
+            # append the property dictionary to the list
+            prop_dict_lst.append(prop_dict)
+
+    # ensure the geometry format is valid
+    geom_typ = geom_typ.upper()
+    if geom_typ not in pyarrow_utils.geom_dict.keys():
+        raise ValueError(
+            f'geometry_format must be one of {", ".join(pyarrow_utils.geom_dict.keys())}.'
         )
 
-        # log remaining results
+    # get the geometry properties for creating the feature class
+    geom_properties = pyarrow_utils.geom_dict.get(geom_typ)
+
+    # create the new feature class
+    arcpy.management.CreateFeatureclass(
+        out_path=str(output_feature_class.parent),
+        out_name=output_feature_class.name,
+        spatial_reference=spatial_reference,
+        **geom_properties,
+    )
+
+    logger.info(f"Created feature class at {str(output_feature_class)}")
+
+    # add the fields to the feature class
+    for prop_dict in prop_dict_lst:
+        arcpy.management.AddField(in_table=str(output_feature_class), **prop_dict)
+
+        # for logging progress
         log_dict = dict()
         log_dict["in_table"] = str(output_feature_class)
-        log_dict = {**log_dict, **schema_dict}
-        logger.info(
-            f"Field added from schema file, but not detected in input data {log_dict}"
-        )
+        log_dict = {**log_dict, **prop_dict}
 
-    # interrogate the ACTUAL column names since, depending on the database, names can get truncated
+        # log progress
+        logger.debug(f"Field added to Feature Class {log_dict}")
+
+    # interrogate the ACTUAL column names - depending on database, names can get truncated, but alias will be correct
     fc_fld_dict = {
         c.aliasName: c.name
         for c in arcpy.ListFields(str(output_feature_class))
-        if c.aliasName in attr_alias_lst
+        if c.aliasName in schema_dict.keys()
     }
 
-    # depending on the input geometry type, set the insert cursor geometry type
-    if geometry_type == "COORDINATES":
-        insert_geom_typ = "SHAPE@XY"
-    elif geometry_type == "H3":
-        insert_geom_typ = "SHAPE@"
-    else:
-        insert_geom_typ = "SHAPE@WKB"
-
     # create the list of feature class columns for the insert cursor and for row lookup from parquet from pydict object
-    insert_col_lst = list(fc_fld_dict.values()) + [insert_geom_typ]
-    pydict_col_lst = list(fc_fld_dict.keys())
+    pa_col_lst = list(fc_fld_dict.keys()) + pa_cursor_geom
+    arcpy_col_lst = list(fc_fld_dict.values()) + [arcpy_cursor_geom]
 
     # this prevents pyarrow from getting hung up
     arcpy.env.autoCancelling = False
@@ -768,29 +807,32 @@ def parquet_to_feature_class(
 
     # create a cursor for inserting rows
     with arcpy.da.InsertCursor(
-        str(output_feature_class), insert_col_lst
+        str(output_feature_class), arcpy_col_lst
     ) as insert_cursor:
-        # partition replacement values dictionary
-        partition_values_dict = {}
-
         # flag for if at sample count and need to break out of loop
         at_sample_count = False
 
         # variable to track start time
         start_time = time.time()
 
-        # create a PyArrow table to iterate
-        ds_tbl = dataset.read(columns=pydict_col_lst)
-
-        # get the total number of rows in the dataset
-        ds_row_cnt = ds_tbl.num_rows
+        # get the total number of rows in the dataset using just one column
+        ds_row_cnt = dataset.read(columns=pa_col_lst[:1]).num_rows
 
         logger.info(f"Starting to import {ds_row_cnt:,} rows from parquet data.")
 
-        # iteratively process the full dataset to avoid memory overruns
-        for batch_idx, batch_tbl in enumerate(ds_tbl.to_batches(max_chunksize=30000)):
+        # initialize the tqdm progress bar
+        tqdm_progressor = tqdm(total=ds_row_cnt, unit="rows", desc="Importing rows")
+
+        # create a table to batch through the data
+        pa_tbl = dataset.read(columns=pa_col_lst)
+
+        # iterate scanner batches
+        for batch in pa_tbl.to_batches(max_chunksize=30000):
+            # handle any complex data types, converting to strings, in the batch table
+            batch = pyarrow_utils.stringify_complex_columns(batch, complex_cols)
+
             # pull the parquet data into a dict
-            pqt_pydict = batch_tbl.to_pydict()
+            pqt_pydict = batch.to_pydict()
 
             # transpose the dictionary of lists into a list of dictionaries
             dict_lst = [
@@ -806,27 +848,27 @@ def parquet_to_feature_class(
                 # try to add the row
                 try:
                     # populate the row dictionary with values from the partition dict to match the insert cursor columns
-                    row_dict = {k: row_pydict.get(k) for k in pydict_col_lst}
+                    row_dict = {k: row_pydict.get(k) for k in pa_col_lst}
+
+                    # create a row by plucking out the values from the parquet pydict in the correct order
+                    row = list(row_dict.values())
 
                     # if the geometry is being generated from coordinate columns, create the coordinate tuple
-                    if geometry_type == "COORDINATES":
-                        geom_tpl = (
+                    if geometry_format == "COORDINATES":
+                        geom = (
                             row_pydict[geometry_column[0]],
                             row_pydict[geometry_column[1]],
                         )
-                        row_dict[insert_geom_typ] = geom_tpl
+
+                        # add the geometry to the row
+                        row = row + [geom]
 
                     # if geometry created from H3 index, create the geometry
-                    elif geometry_type == "H3":
+                    elif geometry_format == "H3":
                         geom = h3_index_to_geometry(row_pydict[geometry_column])
-                        row_dict[insert_geom_typ] = geom
 
-                    # otherwise, just tack wkb geometry onto list
-                    else:
-                        row_dict[insert_geom_typ] = row_pydict[geometry_column]
-
-                    # create a row object by plucking out the values from the row dictionary
-                    row = tuple(row_dict.values())
+                        # add the geometry to the row
+                        row = row + [geom]
 
                     # insert the row
                     insert_cursor.insertRow(row)
@@ -834,13 +876,16 @@ def parquet_to_feature_class(
                     # update the completed count
                     added_cnt += 1
 
+                    # update the tqdm progressor
+                    tqdm_progressor.update()
+
                 # if cannot add the row
                 except Exception as e:
                     # handle case of having issues prior to even getting the row
                     if row is None:
                         logger.error(
                             f"Could create row object for parquet row index {pqt_idx}.\npydict: {pqt_pydict}\n"
-                            f"row_dict: {row_dict}\nbatch index: {batch_idx}\n\nMessage: {e}"
+                            f"row_dict: {row_dict}\n\nMessage: {e}"
                         )
                         raise
 
@@ -860,13 +905,9 @@ def parquet_to_feature_class(
 
                 # provide status updates every 1000 features, and provide an exit if cancelled
                 if added_cnt % 1000 == 0:
-                    arcpy.SetProgressorLabel(f"Imported {added_cnt:,} rows...")
-
                     if arcpy.env.isCancelled:
                         break
 
-                # provide messages every 10,000 features
-                if added_cnt % 10000 == 0:
                     # find the elapsed time
                     elapsed_time = time.time() - start_time
 
@@ -884,15 +925,22 @@ def parquet_to_feature_class(
                         seconds=round(remaining_cnt * per_record_time)
                     )
 
-                    # format remaining time as a string
+                    # format remaining time as a string, even if more than a day
                     if est_remain_time.days > 0:
                         remain_str = f"{est_remain_time.days} days, {str(timedelta(seconds=est_remain_time.seconds))}"
                     else:
                         remain_str = str(timedelta(seconds=est_remain_time.seconds))
 
-                    logger.info(
-                        f"Imported {added_cnt:,} rows at a rate of {rate:,} per hour. Estimated time remaining: {remain_str}."
-                    )
+                    # build the message
+                    msg = (f"Imported {added_cnt:,} rows at a rate of {rate:,} per hour. Estimated time "
+                           f"remaining: {remain_str}.")
+
+                    # set the progressor label
+                    arcpy.SetProgressorLabel(msg)
+
+                # provide messages every 10,000 features
+                # if added_cnt % 10000 == 0:
+                #     logger.info(msg)
 
             # ensure next batch is not run if cancelled or only running a sample
             if arcpy.env.isCancelled or at_sample_count:
@@ -901,6 +949,7 @@ def parquet_to_feature_class(
     # declare success, and track failure if necessary
     success_msg = f"Successfully imported {added_cnt:,} rows."
     arcpy.SetProgressorLabel(success_msg)
+    tqdm_progressor.close()
     arcpy.ResetProgressor()
     logger.info(success_msg)
 

@@ -145,7 +145,7 @@ def test_parquet_to_feature_class_coordinates(tmp_gdb):
         parquet_path=coord_pqt,
         output_feature_class=out_fc,
         geometry_column=coord_cols,
-        geometry_type="COORDINATES",
+        geometry_format="COORDINATES",
         spatial_reference=4326,
     )
 
@@ -169,7 +169,7 @@ def test_parquet_to_feature_class_coordinates_schema(tmp_gdb):
         output_feature_class=out_fc,
         schema_file=coord_schm,
         geometry_column=coord_cols,
-        geometry_type="COORDINATES",
+        geometry_format="COORDINATES",
         spatial_reference=4326,
     )
 
@@ -192,7 +192,7 @@ def test_parquet_to_feature_class_coordinates_no_schema(tmp_gdb):
         parquet_path=coord_pqt,
         output_feature_class=out_fc,
         geometry_column=coord_cols,
-        geometry_type="COORDINATES",
+        geometry_format="COORDINATES",
         spatial_reference=4326,
     )
 
@@ -213,6 +213,29 @@ def test_parquet_to_feature_class_geoparquet_schema(tmp_gdb):
 
 def test_parquet_to_feature_class_h3(tmp_gdb):
     assert False, "Not implemented yet"
+
+
+def test_parquet_to_feature_class_example_geoparquet(tmp_gdb):
+    """Test converting a sample GeoParquet dataset to a feature class"""
+    out_fc = tmp_gdb / "geoparquet_example"
+    in_pqt = dir_smpl / "geoparquet_example"
+
+    in_tbl = pq.ParquetDataset(in_pqt).read()
+    in_cnt = in_tbl.num_rows
+    logger.info(f'Input row count: {in_cnt:,}')
+
+    res = arcpy_parquet.parquet_to_feature_class(
+        parquet_path=in_pqt,
+        output_feature_class=out_fc,
+        geometry_format="GEOPARQUET",
+        spatial_reference=4326,
+    )
+
+    assert arcpy.Exists(str(res))
+    assert arcpy.Describe(str(res)).shapeType == "Polygon"
+
+    out_cnt = int(arcpy.management.GetCount(str(res)).getOutput(0))
+    assert in_cnt == out_cnt
 
 
 def test_get_parquet_max_string_lengths(tmp_gdb):
@@ -236,3 +259,25 @@ def test_create_schema_file_parquet(tmp_dir):
 
     df = pd.read_csv(schema_pth)
     assert(len(df.index) > 0)
+
+
+def test_get_partition_dicts():
+    """Test getting partition dictionaries from a Parquet dataset"""
+    pqt_pth = dir_smpl / "main_fgdb_sample/parquet"
+    res = arcpy_parquet.utils.pyarrow_utils.get_partition_dicts(pqt_pth)
+    assert isinstance(res, list)
+    assert len(res) > 0
+    assert all(isinstance(d, dict) for d in res)
+    assert all(all(isinstance(k, str) for k in d.keys()) for d in res)
+    assert all(all(isinstance(v, (str, int, float, type(None))) for v in d.values()) for d in res)
+
+
+def test_get_partition_strings():
+    """Test getting partition paths from a Parquet dataset"""
+    pqt_pth = dir_smpl / "main_fgdb_sample/parquet"
+    res = arcpy_parquet.utils.pyarrow_utils.get_partition_strings(pqt_pth)
+    assert isinstance(res, list)
+    assert len(res) > 0
+    assert all(isinstance((pqt_pth / p), Path) for p in res)
+    assert all((pqt_pth / p).exists() for p in res)
+    assert all((pqt_pth / p).is_dir() for p in res)

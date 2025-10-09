@@ -1,12 +1,10 @@
 # -*- coding: utf-8 -*-
 import importlib.util
 from pathlib import Path
-from typing import List
 import sys
 
 import arcpy
 import pyarrow.parquet as pq
-from pyarrow.dataset import partitioning
 
 # import the local library, either if in system environment, or through relative path
 if importlib.util.find_spec("arcpy_parquet") is None:
@@ -26,6 +24,8 @@ from arcpy_parquet import (
     feature_class_to_parquet,
 )
 from arcpy_parquet.utils.pyt_utils import deactivate_parameter
+from arcpy_parquet.utils.pyarrow_utils import get_partition_strings
+
 
 # add flag to detect if h3 available
 has_h3 = False if importlib.util.find_spec("h3") is None else True
@@ -140,17 +140,6 @@ class GeoparquetToFeatureClass(object):
             "Class in a GeoDatabase."
         )
 
-    def get_partition_lst(self, dir_pth: Path) -> List[str]:
-        """
-        Helper function to get the directories matching the partitioning pattern.
-        Args:
-            dir_pth: Path to directory.
-
-        Returns:
-            List of directory names for child partitions.
-        """
-        return [p.stem for p in dir_pth.glob("*") if p.is_dir() and p.stem]
-
     def getParameterInfo(self):
         pqt_pth = arcpy.Parameter(
             name="pqt_pth",
@@ -160,42 +149,6 @@ class GeoparquetToFeatureClass(object):
             parameterType="Required",
         )
 
-        pqt_prt_01 = arcpy.Parameter(
-            name="pqt_prt_01",
-            displayName="Parquet Partition",
-            direction="Input",
-            datatype="GPString",
-            parameterType="Optional",
-            enabled=False,
-        )
-
-        pqt_prt_02 = arcpy.Parameter(
-            name="pqt_prt_02",
-            displayName="Parquet Partition",
-            direction="Input",
-            datatype="GPString",
-            parameterType="Optional",
-            enabled=False,
-        )
-
-        pqt_prt_03 = arcpy.Parameter(
-            name="pqt_prt_03",
-            displayName="Parquet Partition",
-            direction="Input",
-            datatype="GPString",
-            parameterType="Optional",
-            enabled=False,
-        )
-
-        sptl_ref = arcpy.Parameter(
-            name="sptl_ref",
-            displayName="Spatial Reference",
-            direction="Input",
-            datatype="GPSpatialReference",
-            parameterType="Required",
-        )
-        sptl_ref.value = arcpy.SpatialReference(4326).exportToString()
-
         geom_type = arcpy.Parameter(
             name="geom_type",
             displayName="Geometry Type",
@@ -203,13 +156,11 @@ class GeoparquetToFeatureClass(object):
             datatype="GPString",
             parameterType="Required",
         )
-
         geom_type.filter.type = "ValueList"
         fltr_lst = ["GEOPARQUET", "COORDINATES"]
         if has_h3:
             fltr_lst.append("H3")
         geom_type.filter.list = fltr_lst
-
         geom_type.value = "COORDINATES"
 
         x_col = arcpy.Parameter(
@@ -242,6 +193,16 @@ class GeoparquetToFeatureClass(object):
         )
         h3_col.filter.type = "ValueList"
 
+        sptl_ref = arcpy.Parameter(
+            name="sptl_ref",
+            displayName="Spatial Reference",
+            direction="Input",
+            datatype="GPSpatialReference",
+            parameterType="Optional",
+            category="Advanced",
+        )
+        sptl_ref.value = arcpy.SpatialReference(4326).exportToString()
+
         out_fc_pth = arcpy.Parameter(
             name="out_fc_pth",
             displayName="Output Feature Class Path",
@@ -250,16 +211,28 @@ class GeoparquetToFeatureClass(object):
             parameterType="Required",
         )
 
-        geom_col = arcpy.Parameter(
-            name="geom_col",
-            displayName="Geometry Column",
-            datatype="GPString",
+        partition = arcpy.Parameter(
+            name='partition',
+            displayName="Partition",
             direction="Input",
-            category="Advanced",
+            datatype="GPString",
             parameterType="Optional",
-            enabled=False,
+            category="Advanced",
+            multiValue=False,
+            enabled=False
         )
-        geom_col.filter.type = "ValueList"
+        partition.filter.type = "ValueList"
+
+        # geom_col = arcpy.Parameter(
+        #     name="geom_col",
+        #     displayName="Geometry Column",
+        #     datatype="GPString",
+        #     direction="Input",
+        #     category="Advanced",
+        #     parameterType="Optional",
+        #     enabled=False,
+        # )
+        # geom_col.filter.type = "ValueList"
 
         build_idx = arcpy.Parameter(
             name="build_idx",
@@ -304,16 +277,13 @@ class GeoparquetToFeatureClass(object):
 
         param_lst = [
             pqt_pth,
-            pqt_prt_01,
-            pqt_prt_02,
-            pqt_prt_03,
-            sptl_ref,
-            out_fc_pth,
-            geom_col,
             geom_type,
             x_col,
             y_col,
             h3_col,
+            sptl_ref,
+            out_fc_pth,
+            partition,
             build_idx,
             smpl,
             smpl_cnt,
@@ -333,16 +303,13 @@ class GeoparquetToFeatureClass(object):
         # unpack the parameters into understandable variable names
         (
             pqt_pth,
-            pqt_prt_01,
-            pqt_prt_02,
-            pqt_prt_03,
-            sptl_ref,
-            out_fc_pth,
-            geom_col,
             geom_type,
             x_col,
             y_col,
             h3_col,
+            sptl_ref,
+            out_fc_pth,
+            partition,
             build_idx,
             smpl,
             smpl_cnt,
@@ -368,32 +335,26 @@ class GeoparquetToFeatureClass(object):
             if not has_part_file:
                 pqt_pth.setErrorMessage('Cannot locate parquet "part" files.')
 
-            # get a list of any level one partitions
-            prt_01_lst = self.get_partition_lst(p_pth)
+            # get a list of available partitions
+            partitions_raw = get_partition_strings(p_pth)
 
-            # update the parquet part parameter if there are partition directories
-            if len(prt_01_lst):
-                pqt_prt_01.filter.type = "ValueList"
-                pqt_prt_01.filter.list = prt_01_lst
-                pqt_prt_01.enabled = True
+            # convert the list of dicts to a list of strings for the parameter filter
+            partition_vals = [get_partition_strings(p_dict) for p_dict in partitions_raw]
 
-        # if the partition 01 is modified, populate and enable level two if applicable
-        if pqt_prt_01.altered:
-            prt_02_lst = self.get_partition_lst(p_pth / pqt_prt_01.value)
-            if len(prt_02_lst):
-                pqt_prt_02.filter.type = "ValueList"
-                pqt_prt_02.filter.list = prt_02_lst
-                pqt_prt_02.enabled = True
+            if len(partition_vals) == 0:
+                # disable the partition parameter if no partitions found and clear out any values
+                partition.enabled = False
+                partition.value = None
+                partition.filter.list = []
+            else:
+                # enable the partition parameter and populate the filter list
+                partition.enabled = True
+                partition.filter.list = partition_vals
 
-        # if the partition 02 is modified, populate and enable level three if applicable
-        if pqt_prt_02.altered:
-            prt_03_lst = self.get_partition_lst(
-                p_pth / pqt_prt_01.value / pqt_prt_02.value
-            )
-            if len(prt_03_lst):
-                pqt_prt_03.filter.type = "ValueList"
-                pqt_prt_03.filter.list = prt_03_lst
-                pqt_prt_03.enabled = True
+                # if the current value is not in the list, set to None
+                if partition.value not in partition_vals:
+                    partition.value = None
+
 
         # if a sample is desired, add ability to specify the sample count
         if smpl.value is True and smpl_cnt.value is None:
@@ -420,7 +381,7 @@ class GeoparquetToFeatureClass(object):
             col_lst = pqt_ds.schema.names
 
             # populate column lists for column parameter inputs
-            geom_col.filter.list = col_lst
+            # geom_col.filter.list = col_lst
             x_col.filter.list = col_lst
             y_col.filter.list = col_lst
             h3_col.filter.list = col_lst
@@ -460,8 +421,8 @@ class GeoparquetToFeatureClass(object):
                 if y_col.value is None:
                     y_col.value = y_col_value
 
-                for param in (geom_col, h3_col):
-                    deactivate_parameter(param)
+                # for param in (geom_col, h3_col):
+                #     deactivate_parameter(param)
 
             elif geom_type.value == "H3":
 
@@ -470,15 +431,15 @@ class GeoparquetToFeatureClass(object):
                 if h3_col.value is None:
                     h3_col.value = h3_col_value
 
-                for param in (geom_col, x_col, y_col):
-                    deactivate_parameter(param)
+                # for param in (geom_col, x_col, y_col):
+                #     deactivate_parameter(param)
 
             else:
 
-                geom_col.parameterType = "Required"
-                geom_col.enabled = True
-                if geom_col.value is None:
-                    geom_col.value = geom_col_value
+                # geom_col.parameterType = "Required"
+                # geom_col.enabled = True
+                # if geom_col.value is None:
+                #     geom_col.value = geom_col_value
 
                 for param in (x_col, y_col, h3_col):
                     deactivate_parameter(param)
@@ -556,7 +517,7 @@ class GeoparquetToFeatureClass(object):
             pqt_pth,
             output_feature_class=Path(out_fc_pth),
             schema_file=schema_file_pth,
-            geometry_type=geom_type,
+            geometry_format=geom_type,
             parquet_partitions=partition_vals,
             geometry_column=geometry_column,
             spatial_reference=sptl_ref,
