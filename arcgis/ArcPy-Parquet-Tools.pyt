@@ -336,10 +336,7 @@ class GeoparquetToFeatureClass(object):
                 pqt_pth.setErrorMessage('Cannot locate parquet "part" files.')
 
             # get a list of available partitions
-            partitions_raw = get_partition_strings(p_pth)
-
-            # convert the list of dicts to a list of strings for the parameter filter
-            partition_vals = [get_partition_strings(p_dict) for p_dict in partitions_raw]
+            partition_vals = get_partition_strings(p_pth)
 
             if len(partition_vals) == 0:
                 # disable the partition parameter if no partitions found and clear out any values
