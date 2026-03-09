@@ -15,7 +15,7 @@ import pyarrow.parquet as pq
 from tqdm import tqdm
 
 from arcpy_parquet.utils import get_logger, pyarrow_utils
-from arcpy_parquet.utils.parquet_utils import (
+from arcpy_parquet.utils.pyarrow_utils import (
     get_geoparquet_header,
     get_parquet_max_string_lengths,
 )
@@ -279,6 +279,7 @@ def feature_class_to_parquet(
                         bounding_box=[x_min, y_min, x_max, y_max]
                         if None not in (x_min, y_min, x_max, y_max)
                         else None,
+                        column_name=geometry_format.lower(),
                     )
 
                     # add the spatial reference to the metadata
@@ -321,8 +322,7 @@ def feature_class_to_parquet(
                 # reset the loading dictionary
                 pa_dict = {col: [] for col in pq_schema.names}
 
-                # reset variables for extent tracking
-                x_min, y_min, x_max, y_max = None, None, None, None
+                # Note: Do NOT reset extent variables - we want the bbox to reflect the entire dataset
 
     # reset the progress indicator
     arcpy.ResetProgressor()
@@ -431,6 +431,11 @@ def parquet_to_feature_class(
         The geometry *must* be encoded as well known binary (WKB), and complex field types
         such as arrays and structs are not supported.
 
+    !!! note
+        When converting GeoParquet files with multiple geometry columns, only the primary 
+        geometry column will be used. Other geometry columns will be ignored and not added 
+        as fields to the feature class.
+
     Args:
         parquet_path: The directory or Parquet part file to convert.
         output_feature_class: Where to save the new Feature Class.
@@ -440,9 +445,10 @@ def parquet_to_feature_class(
             strings. Polygon geometries will be created based on the H3 indices for the rows. Default is `GEOPARQUET`.
         parquet_partitions: Hive partition name and values, if available, to select. For instance,
             if partitioned year and month with year=2023 and month=01, this would be year=2023/month=01.
-        geometry_column: If the geometry type is `GEOPARQUET', this parameter will be ignored. If the geometry type
+        geometry_column: If the geometry type is `GEOPARQUET`, this parameter will be ignored. If the geometry type
             is ``COORDINATES``, this must be an iterable (tuple or list) of the x (longitude) and y (latitude)
-            columns containing the coordinates.
+            columns containing the coordinates. If the geometry type is `H3`, this must be a string with the name
+            of the H3 index column.
         spatial_reference: Spatial reference of input data. Default is WGS84 (WKID: 4326). If the geometry type
             is `GEOPARQUET`, this parameter will be ignored if the spatial reference is available in the parquet
             metadata. However, if the metadata is missing or incomplete, this parameter will be used to define the
@@ -527,6 +533,11 @@ def parquet_to_feature_class(
     # check the schema for any columns with complex data types
     complex_cols = pyarrow_utils.get_complex_columns(dataset)
 
+    # introspect geometry columns from the geoparquet metadata
+    primary_geom_col, all_geom_cols = pyarrow_utils.introspect_geoparquet_geometry_columns(
+        dataset.schema
+    )
+
     # if any complex columns, create a table with just those columns to interrogate
     if len(complex_cols) > 0:
         # initialize dictionary to store max lengths
@@ -566,6 +577,27 @@ def parquet_to_feature_class(
 
     # extract the spatial reference from the parquet metadata if using geoparquet
     if geometry_format == "GEOPARQUET":
+        # validate that this is actually geoparquet data
+        if primary_geom_col is None:
+            raise ValueError(
+                "The dataset does not appear to be formatted as GeoParquet. No geometry metadata was found. "
+                "If you want to import from coordinate columns or H3, please specify the geometry_format parameter."
+            )
+
+        # validate that the primary geometry column exists in the schema
+        if primary_geom_col not in dataset.schema.names:
+            raise ValueError(
+                f"The primary geometry column '{primary_geom_col}' from the GeoParquet metadata does not "
+                f"exist in the dataset schema. Available columns: {', '.join(dataset.schema.names)}"
+            )
+
+        # log if there are multiple geometry columns
+        if len(all_geom_cols) > 1:
+            logger.info(
+                f"Multiple geometry columns detected in GeoParquet metadata: {', '.join(all_geom_cols)}. "
+                f"Using primary column '{primary_geom_col}'. Other geometry columns will be ignored."
+            )
+
         # get the geometry information from the parquet metadata if available
         geo_dict = pyarrow_utils.get_geoparquet_metadata(dataset.schema)
 
@@ -573,10 +605,8 @@ def parquet_to_feature_class(
         geom_typ = pyarrow_utils.get_geometry_type(geo_dict)
 
         # get the primary geometry column name
-        geometry_column = geo_dict.get("primary_column")
-        pa_cursor_geom = (
-            geometry_column  # TODO: support other optional geometry columns
-        )
+        geometry_column = primary_geom_col
+        pa_cursor_geom = geometry_column
 
         # set the cursor geometry token
         arcpy_cursor_geom = "SHAPE@WKB"
@@ -585,7 +615,7 @@ def parquet_to_feature_class(
         spatial_reference = pyarrow_utils.get_spatial_reference(geo_dict)
 
         # remove any geometry columns from the schema dictionary so they don't get added as fields
-        for geom_col in pyarrow_utils.get_geometry_columns(geo_dict):
+        for geom_col in all_geom_cols:
             if geom_col in schema_dict:
                 schema_dict.pop(geom_col)
 
@@ -595,10 +625,25 @@ def parquet_to_feature_class(
         pa_cursor_geom = [geometry_column]
         arcpy_cursor_geom = "SHAPE@WKB"
 
+        # validate the H3 column is provided
+        if geometry_column is None:
+            raise ValueError(
+                "When using H3 as the geometry format, you must provide the geometry_column parameter "
+                "with the name of the H3 index column."
+            )
+
         # ensure the geometry column is in the input data
         if geometry_column not in dataset.schema.names:
             raise ValueError(
-                "The geometry_column does not appear to be in the input parquet columns."
+                f"The H3 geometry_column '{geometry_column}' does not appear to be in the input parquet columns. "
+                f"Available columns: {', '.join(dataset.schema.names)}"
+            )
+
+        # warn if this appears to be geoparquet data but user is using H3
+        if primary_geom_col is not None:
+            logger.warning(
+                f"The dataset appears to be GeoParquet with geometry column '{primary_geom_col}', "
+                f"but you are using H3 format with column '{geometry_column}'. Make sure this is intentional."
             )
 
     # if working with coordinates, set the geometry type to points, set the cursor geometry token and validate
@@ -620,7 +665,7 @@ def parquet_to_feature_class(
         ):
             raise ValueError(
                 f"The geometry_column names provided for the coordinate columns do not appear to be in "
-                f"the input parquet columns."
+                f"the input parquet columns. Available columns: {', '.join(dataset.schema.names)}"
             )
 
         # ensure the coordinate columns are numeric types
@@ -640,6 +685,13 @@ def parquet_to_feature_class(
                     "Coordinate columns must be one of the following types: "
                     "int8, int16, int32, int64, float, double, or decimal."
                 )
+
+        # warn if this appears to be geoparquet data but user is using coordinates
+        if primary_geom_col is not None:
+            logger.warning(
+                f"The dataset appears to be GeoParquet with geometry column '{primary_geom_col}', "
+                f"but you are using COORDINATES format with columns {geometry_column}. Make sure this is intentional."
+            )
 
     # if spatial reference is a WKID create a spatial reference object
     if isinstance(spatial_reference, str) and spatial_reference.isnumeric():
