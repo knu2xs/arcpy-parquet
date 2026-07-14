@@ -18,17 +18,10 @@ if importlib.util.find_spec("arcpy_parquet") is None:
     else:
         sys.path.insert(0, str(dir_src))
 
-from arcpy_parquet import (
-    create_schema_file,
-    parquet_to_feature_class,
-    feature_class_to_parquet,
-)
+from arcpy_parquet import create_schema_file
+from arcpy_parquet.geoparquet import features_to_geoparquet, geoparquet_to_features
 from arcpy_parquet.utils.pyt_utils import deactivate_parameter
 from arcpy_parquet.utils.pyarrow_utils import get_partition_strings
-
-
-# add flag to detect if h3 available
-has_h3 = False if importlib.util.find_spec("h3") is None else True
 
 
 class Toolbox(object):
@@ -86,7 +79,7 @@ class FeatureClassToParquet(object):
             parameterType="Required",
         )
         geometry_format.filter.type = "ValueList"
-        geometry_format.filter.list = ["WKB", "XY"]
+        geometry_format.filter.list = ["WKB"]
         geometry_format.value = "WKB"
 
         param_lst = [input_table, output_parquet, partitioning_columns, geometry_format]
@@ -120,12 +113,10 @@ class FeatureClassToParquet(object):
         # get the literal value for the output format
         geometry_format = parameters[3].valueAsText
 
-        feature_class_to_parquet(
-            input_table=in_tbl_pth,
-            output_parquet=out_pqt_pth,
-            partition_columns=partition_cols,
-            include_geometry=True,
-            geometry_format=geometry_format,
+        features_to_geoparquet(
+            feature_class=in_tbl_pth,
+            output_path=out_pqt_pth,
+            partition_fields=partition_cols,
             batch_size=300000,
         )
 
@@ -157,11 +148,8 @@ class GeoparquetToFeatureClass(object):
             parameterType="Required",
         )
         geom_type.filter.type = "ValueList"
-        fltr_lst = ["GEOPARQUET", "COORDINATES"]
-        if has_h3:
-            fltr_lst.append("H3")
-        geom_type.filter.list = fltr_lst
-        geom_type.value = "COORDINATES"
+        geom_type.filter.list = ["GEOPARQUET"]
+        geom_type.value = "GEOPARQUET"
 
         x_col = arcpy.Parameter(
             name="x_col",
@@ -374,7 +362,7 @@ class GeoparquetToFeatureClass(object):
         if pqt_pth.altered:
 
             #  read the columns to provide options for other columns
-            pqt_ds = pq.ParquetDataset(pqt_pth.valueAsText, use_legacy_dataset=False)
+            pqt_ds = pq.ParquetDataset(pqt_pth.valueAsText)
             col_lst = pqt_ds.schema.names
 
             # populate column lists for column parameter inputs
@@ -472,54 +460,44 @@ class GeoparquetToFeatureClass(object):
 
         # unpack the parameters
         pqt_pth = parameters[0].valueAsText
-        pqt_prt_01 = parameters[1].valueAsText
-        pqt_prt_02 = parameters[2].valueAsText
-        pqt_prt_03 = parameters[3].valueAsText
-        sptl_ref = parameters[4].value
-        out_fc_pth = parameters[5].valueAsText
-        geom_col = parameters[6].valueAsText
-        geom_type = parameters[7].valueAsText
-        x_col = parameters[8].valueAsText
-        y_col = parameters[9].valueAsText
-        h3_col = parameters[10].valueAsText
-        build_idx = parameters[11].value
-        smpl = parameters[12].value
-        smpl_cnt = parameters[13].valueAsText
-        schema_file_pth = parameters[14].valueAsText
+        geom_type = parameters[1].valueAsText
+        sptl_ref = parameters[5].value
+        out_fc_pth = parameters[6].valueAsText
+        partition = parameters[7].valueAsText
+        build_idx = parameters[8].value
+        smpl = parameters[9].value
+        smpl_cnt = parameters[10].valueAsText
+        schema_file_pth = parameters[11].valueAsText
 
-        # pass the JSON path in as a Path object
-        if schema_file_pth is not None:
-            schema_file_pth = Path(schema_file_pth)
+        if geom_type != "GEOPARQUET":
+            raise ValueError('Only "GEOPARQUET" is supported by this tool.')
 
-        # partitions
-        partition_vals = [pqt_prt_01, pqt_prt_02, pqt_prt_03]
-        partition_vals = [p for p in partition_vals if p is not None]  # not none
+        if partition:
+            arcpy.AddWarning(
+                "Partition filtering is not supported by geoparquet_to_features and will be ignored."
+            )
+        if build_idx is False:
+            arcpy.AddWarning(
+                "Build Spatial Index option is not exposed by geoparquet_to_features and will be ignored."
+            )
+        if smpl:
+            arcpy.AddWarning(
+                "Sample import options are not supported by geoparquet_to_features and will be ignored."
+            )
+        if smpl_cnt:
+            arcpy.AddWarning(
+                "Sample count is not supported by geoparquet_to_features and will be ignored."
+            )
+        if schema_file_pth:
+            arcpy.AddWarning(
+                "Schema file input is not used by geoparquet_to_features and will be ignored."
+            )
 
-        # handle option for coordinates
-        if geom_type == "COORDINATES":
-            geometry_column = [x_col, y_col]
-        elif geom_type == "H3":
-            geometry_column = h3_col
-        else:
-            geometry_column = geom_col
-
-        # optionally add and format outputting a sample
-        if smpl is True:
-            smpl_cnt = int(smpl_cnt)
-        else:
-            smpl_cnt = None
-
-        # execute the function
-        parquet_to_feature_class(
-            pqt_pth,
-            output_feature_class=Path(out_fc_pth),
-            schema_file=schema_file_pth,
-            geometry_format=geom_type,
-            parquet_partitions=partition_vals,
-            geometry_column=geometry_column,
+        geoparquet_to_features(
+            parquet_path=pqt_pth,
+            feature_class=out_fc_pth,
             spatial_reference=sptl_ref,
-            sample_count=smpl_cnt,
-            build_spatial_index=build_idx,
+            overwrite=arcpy.env.overwriteOutput,
         )
 
         return

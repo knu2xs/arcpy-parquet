@@ -53,10 +53,10 @@ import pyarrow as pa
 import pyarrow.dataset as ds
 import pyarrow.parquet as pq
 
-from .utils._logging import get_logger
-from .utils._main_utils import slugify
+from .utils.logging_utils import get_logger
+from .utils.main import slugify
 
-logger = get_logger(__name__, level="DEBUG", add_stream_handler=False)
+logger = get_logger(level="DEBUG", logger_name="arcpy_parquet.geoparquet")
 
 __all__ = [
     "features_to_geoparquet",
@@ -73,6 +73,40 @@ _CENTROID_COLUMN = "geometry_centroid"
 
 _DEFAULT_BATCH_SIZE = 10_000
 """Number of rows to accumulate per RecordBatch when streaming to/from Parquet."""
+
+
+def _validate_batch_size(batch_size: int) -> int:
+    """Validate and normalize batch size for streaming operations.
+
+    Args:
+        batch_size: Candidate batch size.
+
+    Returns:
+        Validated positive batch size.
+
+    Raises:
+        ValueError: If batch_size is not a positive integer.
+    """
+    if not isinstance(batch_size, int) or batch_size <= 0:
+        raise ValueError("batch_size must be a positive integer.")
+    return batch_size
+
+
+def _normalize_partition_value(value: Any) -> str:
+    """Normalize partition value to stable Hive path component text.
+
+    Args:
+        value: Raw partition value.
+
+    Returns:
+        String partition value with deterministic fallback for empty values.
+    """
+    if value is None:
+        return "__missing__"
+    text_value = str(value).strip()
+    if text_value == "":
+        return "__missing__"
+    return text_value
 
 
 # ---------------------------------------------------------------------------
@@ -156,6 +190,7 @@ def features_to_geoparquet(
     feature_class = str(feature_class)
     output_path = Path(output_path)
 
+    batch_size = _validate_batch_size(batch_size)
     partition_fields = list(partition_fields) if partition_fields else []
     is_partitioned = len(partition_fields) > 0
 
@@ -376,6 +411,8 @@ def _write_partitioned(
     buffered = 0
     total_written = 0
 
+    normalized_partition_fields = set(partition_fields)
+
     with arcpy.da.SearchCursor(
         in_table=feature_class,
         field_names=cursor_fields,
@@ -384,6 +421,8 @@ def _write_partitioned(
     ) as cursor:
         for row in cursor:
             for field, value in zip(fields, row[: len(fields)]):
+                if field in normalized_partition_fields:
+                    value = _normalize_partition_value(value)
                 attr_data[field].append(value)
             wkb_list.append(bytes(row[len(fields)]))
             if include_centroids:
