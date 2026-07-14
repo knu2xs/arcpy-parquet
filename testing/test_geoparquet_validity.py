@@ -1,5 +1,5 @@
 """
-Tests to validate that feature_class_to_parquet creates valid GeoParquet files.
+Tests to validate that features_to_parquet creates valid GeoParquet files.
 
 This test suite verifies:
 1. GeoParquet metadata is correctly formatted according to the specification
@@ -106,7 +106,7 @@ def test_geoparquet_metadata_exists(sample_fc, tmp_gdb):
     output_dir = tmp_gdb.parent / "parquet_output"
     output_dir.mkdir(exist_ok=True)
     
-    arcpy_parquet.feature_class_to_parquet(
+    arcpy_parquet.features_to_parquet(
         input_table=sample_fc,
         output_parquet=output_dir,
         include_geometry=True,
@@ -134,7 +134,7 @@ def test_geometry_column_name_matches(sample_fc, tmp_gdb):
     output_dir.mkdir(exist_ok=True)
     
     # Export with WKB format
-    arcpy_parquet.feature_class_to_parquet(
+    arcpy_parquet.features_to_parquet(
         input_table=sample_fc,
         output_parquet=output_dir,
         include_geometry=True,
@@ -175,7 +175,7 @@ def test_bbox_reflects_entire_dataset(sample_fc, tmp_gdb):
     logger.info(f"Feature class extent: {fc_extent}")
     
     # Export with small batch size to ensure multiple batches
-    arcpy_parquet.feature_class_to_parquet(
+    arcpy_parquet.features_to_parquet(
         input_table=sample_fc,
         output_parquet=output_dir,
         include_geometry=True,
@@ -219,7 +219,7 @@ def test_multiple_batches_same_bbox(sample_fc, tmp_gdb):
     output_dir.mkdir(exist_ok=True)
     
     # Export with small batch size
-    arcpy_parquet.feature_class_to_parquet(
+    arcpy_parquet.features_to_parquet(
         input_table=sample_fc,
         output_parquet=output_dir,
         include_geometry=True,
@@ -262,11 +262,11 @@ def test_multiple_batches_same_bbox(sample_fc, tmp_gdb):
 
 
 def test_geoparquet_version_compliance(sample_fc, tmp_gdb):
-    """Test that GeoParquet metadata follows version 1.0.0 specification"""
+    """Test that GeoParquet metadata follows version 1.1.0 specification"""
     output_dir = tmp_gdb.parent / "parquet_version_test"
     output_dir.mkdir(exist_ok=True)
     
-    arcpy_parquet.feature_class_to_parquet(
+    arcpy_parquet.features_to_parquet(
         input_table=sample_fc,
         output_parquet=output_dir,
         include_geometry=True,
@@ -277,8 +277,8 @@ def test_geoparquet_version_compliance(sample_fc, tmp_gdb):
     geo_metadata = get_geoparquet_metadata(output_dir)
     
     # Verify version
-    assert geo_metadata["version"] == "1.0.0", \
-        f"Expected GeoParquet version 1.0.0, got {geo_metadata['version']}"
+    assert geo_metadata["version"] == "1.1.0", \
+        f"Expected GeoParquet version 1.1.0, got {geo_metadata['version']}"
     
     # Verify primary_column structure
     primary_column = geo_metadata["primary_column"]
@@ -299,7 +299,7 @@ def test_geoparquet_version_compliance(sample_fc, tmp_gdb):
     assert isinstance(col_metadata["geometry_types"], list), \
         "geometry_types must be a list"
     
-    logger.info("GeoParquet metadata complies with v1.0.0 specification")
+    logger.info("GeoParquet metadata complies with v1.1.0 specification")
 
 
 def test_xy_format_no_geoparquet_metadata(sample_fc, tmp_gdb):
@@ -308,7 +308,7 @@ def test_xy_format_no_geoparquet_metadata(sample_fc, tmp_gdb):
     output_dir.mkdir(exist_ok=True)
     
     # Export with XY format (centroid coordinates)
-    arcpy_parquet.feature_class_to_parquet(
+    arcpy_parquet.features_to_parquet(
         input_table=sample_fc,
         output_parquet=output_dir,
         include_geometry=True,
@@ -339,7 +339,7 @@ def test_encoding_in_metadata(sample_fc, tmp_gdb):
     output_dir.mkdir(exist_ok=True)
     
     # Export with WKB format
-    arcpy_parquet.feature_class_to_parquet(
+    arcpy_parquet.features_to_parquet(
         input_table=sample_fc,
         output_parquet=output_dir,
         include_geometry=True,
@@ -368,7 +368,7 @@ def test_geometry_type_in_metadata(sample_fc, tmp_gdb):
     fc_geom_type = desc.shapeType
     logger.info(f"Feature class geometry type: {fc_geom_type}")
     
-    arcpy_parquet.feature_class_to_parquet(
+    arcpy_parquet.features_to_parquet(
         input_table=sample_fc,
         output_parquet=output_dir,
         include_geometry=True,
@@ -401,3 +401,4 @@ def test_geometry_type_in_metadata(sample_fc, tmp_gdb):
 if __name__ == "__main__":
     # Run with pytest
     pytest.main([__file__, "-v", "-s"])
+

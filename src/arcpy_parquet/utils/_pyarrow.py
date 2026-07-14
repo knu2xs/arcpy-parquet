@@ -10,7 +10,21 @@ from osgeo import osr
 from arcpy_parquet.utils import get_logger
 
 # set up logging
-logger = get_logger(logger_name="arcpy_parquet.utils.pyarrow_utils", level="DEBUG")
+logger = get_logger(logger_name="arcpy_parquet.utils._pyarrow", level="DEBUG")
+
+GEOPARQUET_VERSION = "1.1.0"
+
+# mapping data types for going from a feature class to parquet
+export_dtype_dict = {
+    "OID": pa.int64(),
+    "Date": pa.timestamp("s"),
+    "Double": pa.float64(),
+    "Integer": pa.int64(),
+    "Single": pa.float32(),
+    "SmallInteger": pa.int16(),
+    "Blob": pa.large_binary(),
+    "String": pa.string(),
+}
 
 # mapping data types for going from pyarrow to a feature class
 import_dtype_dict = {
@@ -69,67 +83,45 @@ geom_dict = {
     },
 }
 
-# template for the geoparquet metadata
-geoparquet_metadata_template = {
-    "version": "1.0.0",
-    "primary_column": "geometry",
-    "columns": {
-        "geometry": {
-            "encoding": "WKB",
-            "geometry_types": ["Point"],
-            "crs": {
-                "type": "GeographicCRS",
-                "name": "GCS WGS 1984",
-                "bbox": {
-                    "east_longitude": 180.0,
-                    "west_longitude": -180.0,
-                    "south_latitude": -90.0,
-                    "north_latitude": 90.0,
-                },
-                "datum": {
-                    "type": "GeodeticReferenceFrame",
-                    "name": "D WGS 1984",
-                    "ellipsoid": {
-                        "name": "WGS 1984",
-                        "semi_major_axis": 6378137.0,
-                        "inverse_flattening": 298.257223563,
-                    },
-                    "prime_meridian": {"name": "Greenwich", "longitude": 0.0},
-                    "id": {"authority": "EPSG", "code": 6326},
-                },
-                "coordinate_system": {
-                    "subtype": "ellipsoidal",
-                    "axis": [
-                        {
-                            "name": "Latitude",
-                            "abbreviation": "lat",
-                            "direction": "north",
-                            "unit": "degree",
-                        },
-                        {
-                            "name": "Longitude",
-                            "abbreviation": "lon",
-                            "direction": "east",
-                            "unit": "degree",
-                        },
-                    ],
-                },
-                "area": "World (by country)",
-                "id": {"authority": "EPSG", "code": 4326},
-            },
-            "bbox": [
-                -86.30001068115234,
-                25.772332637530994,
-                -80.19155100671779,
-                32.6189679949766,
-            ],
-        }
-    },
-}
+
+def normalize_export_geometry_format(geometry_format: Optional[str]) -> str:
+    """Normalize and validate geometry format for feature export.
+
+    Args:
+        geometry_format: Geometry format requested by caller.
+
+    Returns:
+        Normalized geometry format token.
+
+    Raises:
+        ValueError: If the format is missing or unsupported.
+    """
+    if geometry_format is None:
+        raise ValueError(
+            'geometry_format must be one of "GEOPARQUET", "H3", "XY", or "GEOJSON".'
+        )
+
+    normalized = geometry_format.upper()
+
+    if normalized == "WKB":
+        raise ValueError(
+            "geometry_format='WKB' is no longer explicitly supported. "
+            "Use geometry_format='GEOPARQUET' instead."
+        )
+
+    if normalized == "JSON":
+        normalized = "GEOJSON"
+
+    if normalized not in ("GEOPARQUET", "H3", "XY", "GEOJSON"):
+        raise ValueError(
+            'geometry_format must be one of "GEOPARQUET", "H3", "XY", or "GEOJSON".'
+        )
+
+    return normalized
 
 
 def get_complex_columns(
-    table_or_dataset: Union[pa.Table, pq.ParquetDataset]
+    table_or_dataset: Union[pa.Table, pq.ParquetDataset],
 ) -> list[str]:
     """
     Get a list of complex (nested) columns in a PyArrow Table.
@@ -245,7 +237,9 @@ def get_schema_dict(schema: pa.Schema) -> dict:
     return column_dict
 
 
-def get_partition_dicts(dataset: Union[str, Path, pq.ParquetDataset], all_combinations: bool = True) -> list[dict[str, int]]:
+def get_partition_dicts(
+    dataset: Union[str, Path, pq.ParquetDataset], all_combinations: bool = True
+) -> list[dict[str, int]]:
     """
     Get a list of partition dictionaries from a PyArrow ParquetDataset.
 
@@ -259,38 +253,24 @@ def get_partition_dicts(dataset: Union[str, Path, pq.ParquetDataset], all_combin
     """
     # ensure the dataset is a parquet dataset
     if isinstance(dataset, (Path, str)):
-        dataset = pq.ParquetDataset(dataset)
+        dataset = pq.ParquetDataset(dataset, partitioning=None)
 
-    # get the fragments from the dataset
-    fragments = dataset.fragments
-
+    # parse partition keys/values from partitioned fragment paths: key=value
     partition_set = set()
-
-    # add all the partition expressions as strings to a set to get unique values
-    for fragment in fragments:
-        expr = fragment.partition_expression
-        expr_str = str(expr)
-        partition_set.add(expr_str)
-
-    partition_lst = []
-
-    # helper function to clean up strings
-    clean_str = lambda s: s.strip().lstrip('(').rstrip(')').strip() if isinstance(s, str) else s
-
-    # parse these out into the discrete parts
-    for expr_str in partition_set:
-        parts = clean_str(expr_str).split("and")
+    for fragment in dataset.fragments:
         partition = {}
-        for part in parts:
-            key, _, value = part.partition("==")
-            key = clean_str(key)
-            value = value if value is None else clean_str(value)
-            # if the value is a string, remove any extra quotes
-            if isinstance(value, str):
-                value = value.strip().strip("'").strip('"')
-            # add to the partition dictionary
-            partition[key] = value
-        partition_lst.append(partition)
+        for part in Path(fragment.path).parts:
+            if "=" in part:
+                key, value = part.split("=", 1)
+                partition[key] = format_value(value)
+
+        if partition:
+            partition_set.add(tuple(partition.items()))
+
+    partition_lst = [dict(items) for items in partition_set]
+
+    if len(partition_lst) == 0:
+        return partition_lst
 
     # if all combinations, generate all combinations of the partition dictionaries
     if all_combinations:
@@ -299,7 +279,9 @@ def get_partition_dicts(dataset: Union[str, Path, pq.ParquetDataset], all_combin
     return partition_lst
 
 
-def get_partition_strings(dataset: Union[str, Path, pq.ParquetDataset], all_combinations: bool = True) -> list[str]:
+def get_partition_strings(
+    dataset: Union[str, Path, pq.ParquetDataset], all_combinations: bool = True
+) -> list[str]:
     """
     Get a list of partition path strings from a PyArrow ParquetDataset.
 
@@ -310,52 +292,21 @@ def get_partition_strings(dataset: Union[str, Path, pq.ParquetDataset], all_comb
     Returns:
         List of partition path strings.
     """
+    dataset_root: Optional[Path] = None
+    if isinstance(dataset, (str, Path)):
+        dataset_root = Path(dataset)
+
     partition_dicts = get_partition_dicts(dataset, all_combinations=all_combinations)
     partition_strings = [
         partition_path_from_dict(partition_dict) for partition_dict in partition_dicts
     ]
-    return partition_strings
 
-
-    if isinstance(dataset, pq.ParquetDataset):
-        partition_dicts = get_partition_dicts(dataset, all_combinations=all_combinations)
+    if dataset_root is not None:
         partition_strings = [
-            partition_path_from_dict(partition_dict) for partition_dict in partition_dicts
+            partition
+            for partition in partition_strings
+            if (dataset_root / partition).exists()
         ]
-    else:
-        # ensure dataset is a path
-        dataset = Path(dataset)
-
-        # get parent and iteratively all parent with subsequent children combinations
-        if all_combinations:
-
-            # list to hold the partition strings
-            partition_strings = []
-
-            # get all the parent directories and their children
-            parent_parts = [p.parent for p in dataset.rglob("*") if p.is_dir()]
-
-            # iterate the parents and their children to get all combinations
-            for parent in parent_parts:
-
-                # iterate the children of each parent
-                for child in parent.rglob("*"):
-
-                    # if a directory, add to the list
-                    if child.is_dir():
-
-                        # get the relative path from the dataset root
-                        rel_path = str(child.relative_to(dataset))
-
-                        # if not already in the list, add it
-                        if rel_path not in partition_strings:
-                            partition_strings.append(rel_path)
-
-         # get all the partition directories, without combinations
-        else:
-            partition_strings = [
-                str(p.relative_to(dataset)) for p in dataset.rglob("*") if p.is_dir()
-            ]
 
     return partition_strings
 
@@ -625,6 +576,10 @@ def introspect_geoparquet_geometry_columns(
             - Primary geometry column name (None if not GeoParquet)
             - List of all geometry column names (empty list if not GeoParquet)
     """
+    # if no schema metadata, this is not GeoParquet
+    if schema.metadata is None:
+        return None, []
+
     # try to get the geometry information from the parquet metadata if available
     geo_str = schema.metadata.get(b"geo")
 
@@ -644,7 +599,10 @@ def introspect_geoparquet_geometry_columns(
     return primary_column, geometry_columns
 
 
-def validate_parquet_path(parquet_path: Union[str, Path]) -> Path:
+def validate_parquet_path(
+    parquet_path: Union[str, Path],
+    parquet_partitions: Optional[list[str]] = None,
+) -> Path:
     """Validate the input Parquet path exists and is a directory."""
     # if a string, make into a path
     if isinstance(parquet_path, str):
@@ -675,11 +633,7 @@ def validate_parquet_path(parquet_path: Union[str, Path]) -> Path:
             "The provided directory and partitions do not appear to contain any parquet "
             "part files."
         )
-    elif (
-        parquet_path.is_file()
-        and parquet_partitions is not None
-        or len(parquet_partitions) > 0
-    ):
+    elif parquet_path.is_file() and parquet_partitions:
         raise ValueError(
             "If providing a parquet part file, you cannot specify a parquet partition."
         )
@@ -693,7 +647,7 @@ def validate_parquet_path(parquet_path: Union[str, Path]) -> Path:
 
 
 def ensure_parquet_dataset(
-    parquet_dataset: Union[str, Path, pq.ParquetDataset]
+    parquet_dataset: Union[str, Path, pq.ParquetDataset],
 ) -> pq.ParquetDataset:
     """Ensure the input is a ParquetDataset object."""
     # don't do anything if already a ParquetDataset
@@ -709,7 +663,7 @@ def ensure_parquet_dataset(
             )
 
         # create a ParquetDataset object
-        parquet_dataset = pq.ParquetDataset(parquet_dataset)
+        parquet_dataset = pq.ParquetDataset(parquet_dataset, partitioning=None)
 
     return parquet_dataset
 
@@ -753,7 +707,7 @@ def get_parquet_max_string_lengths(
 
 
 def get_geoparquet_bbox(
-    parquet_dataset: Union[str, Path, pq.ParquetDataset]
+    parquet_dataset: Union[str, Path, pq.ParquetDataset],
 ) -> list[int]:
     """For a Geoparquet dataset, get the full maximum bounding box."""
     dataset = ensure_parquet_dataset(parquet_dataset)
@@ -799,7 +753,7 @@ def get_geoparquet_bbox(
 
 
 def get_spatial_reference_projjson(
-    spatial_reference: Union[int, dict, "arcpy.SpatialReference"]
+    spatial_reference: Union[int, dict, "arcpy.SpatialReference"],
 ) -> dict:
     """
     Get the PROJJSON representation of a Spatial Reference.
@@ -905,7 +859,7 @@ def get_geoparquet_header(
         col_dict["bbox"] = bounding_box
 
     gpqt_header = {
-        "version": "1.0.0",
+        "version": GEOPARQUET_VERSION,
         "primary_column": column_name,
         "columns": {column_name: col_dict},
     }

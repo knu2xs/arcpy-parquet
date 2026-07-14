@@ -1,5 +1,5 @@
 """
-Comprehensive test suite for parquet_to_feature_class function.
+Comprehensive test suite for parquet_to_features function.
 
 This module contains tests for:
 - GeoParquet format with single and multiple geometry columns
@@ -36,7 +36,7 @@ gdb_smpl = dir_smpl / "sample.gdb"
 # insert the src directory into the path and import the project package
 sys.path.insert(0, str(dir_src))
 import arcpy_parquet
-from arcpy_parquet.utils import pyarrow_utils
+from arcpy_parquet.utils import pyarrow_utils as pyarrow_helpers
 
 # set up logging
 logger = arcpy_parquet.utils.get_logger(logger_name=Path(__file__).stem, level="DEBUG")
@@ -154,7 +154,7 @@ def create_test_geoparquet(
     table = pa.Table.from_pydict(data)
 
     # create GeoParquet metadata
-    geo_metadata = pyarrow_utils.get_geoparquet_header(
+    geo_metadata = pyarrow_helpers.get_geoparquet_header(
         geometry_type=geometry_type,
         encoding="WKB",
         spatial_reference=spatial_reference,
@@ -307,7 +307,7 @@ def test_geoparquet_point(tmp_gdb, tmp_pqt):
 
     # convert to feature class
     out_fc = tmp_gdb / "test_geoparquet_point"
-    result = arcpy_parquet.parquet_to_feature_class(
+    result = arcpy_parquet.parquet_to_features(
         parquet_path=pqt_path,
         output_feature_class=out_fc,
         geometry_format="GEOPARQUET",
@@ -332,7 +332,7 @@ def test_geoparquet_polyline(tmp_gdb, tmp_pqt):
 
     # convert to feature class
     out_fc = tmp_gdb / "test_geoparquet_polyline"
-    result = arcpy_parquet.parquet_to_feature_class(
+    result = arcpy_parquet.parquet_to_features(
         parquet_path=pqt_path,
         output_feature_class=out_fc,
         geometry_format="GEOPARQUET",
@@ -357,7 +357,7 @@ def test_geoparquet_polygon(tmp_gdb, tmp_pqt):
 
     # convert to feature class
     out_fc = tmp_gdb / "test_geoparquet_polygon"
-    result = arcpy_parquet.parquet_to_feature_class(
+    result = arcpy_parquet.parquet_to_features(
         parquet_path=pqt_path,
         output_feature_class=out_fc,
         geometry_format="GEOPARQUET",
@@ -386,7 +386,7 @@ def test_geoparquet_multiple_geometries(tmp_gdb, tmp_pqt):
 
     # convert to feature class
     out_fc = tmp_gdb / "test_geoparquet_multi_geom"
-    result = arcpy_parquet.parquet_to_feature_class(
+    result = arcpy_parquet.parquet_to_features(
         parquet_path=pqt_path,
         output_feature_class=out_fc,
         geometry_format="GEOPARQUET",
@@ -418,7 +418,7 @@ def test_geoparquet_different_spatial_reference(tmp_gdb, tmp_pqt):
 
     # convert to feature class
     out_fc = tmp_gdb / "test_geoparquet_3857"
-    result = arcpy_parquet.parquet_to_feature_class(
+    result = arcpy_parquet.parquet_to_features(
         parquet_path=pqt_path,
         output_feature_class=out_fc,
         geometry_format="GEOPARQUET",
@@ -442,7 +442,7 @@ def test_geoparquet_sample_count(tmp_gdb, tmp_pqt):
 
     # convert to feature class with sample count
     out_fc = tmp_gdb / "test_geoparquet_sample"
-    result = arcpy_parquet.parquet_to_feature_class(
+    result = arcpy_parquet.parquet_to_features(
         parquet_path=pqt_path,
         output_feature_class=out_fc,
         geometry_format="GEOPARQUET",
@@ -464,7 +464,7 @@ def test_geoparquet_no_spatial_index(tmp_gdb, tmp_pqt):
 
     # convert to feature class without spatial index
     out_fc = tmp_gdb / "test_geoparquet_no_index"
-    result = arcpy_parquet.parquet_to_feature_class(
+    result = arcpy_parquet.parquet_to_features(
         parquet_path=pqt_path,
         output_feature_class=out_fc,
         geometry_format="GEOPARQUET",
@@ -486,7 +486,7 @@ def test_geoparquet_no_compact(tmp_gdb, tmp_pqt):
 
     # convert to feature class without compacting
     out_fc = tmp_gdb / "test_geoparquet_no_compact"
-    result = arcpy_parquet.parquet_to_feature_class(
+    result = arcpy_parquet.parquet_to_features(
         parquet_path=pqt_path,
         output_feature_class=out_fc,
         geometry_format="GEOPARQUET",
@@ -511,7 +511,7 @@ def test_coordinates_basic(tmp_gdb, tmp_pqt):
 
     # convert to feature class
     out_fc = tmp_gdb / "test_coordinates_basic"
-    result = arcpy_parquet.parquet_to_feature_class(
+    result = arcpy_parquet.parquet_to_features(
         parquet_path=pqt_path,
         output_feature_class=out_fc,
         geometry_format="COORDINATES",
@@ -538,7 +538,7 @@ def test_coordinates_custom_columns(tmp_gdb, tmp_pqt):
 
     # convert to feature class
     out_fc = tmp_gdb / "test_coordinates_custom"
-    result = arcpy_parquet.parquet_to_feature_class(
+    result = arcpy_parquet.parquet_to_features(
         parquet_path=pqt_path,
         output_feature_class=out_fc,
         geometry_format="COORDINATES",
@@ -559,7 +559,7 @@ def test_coordinates_sample_count(tmp_gdb, tmp_pqt):
 
     # convert to feature class with sample count
     out_fc = tmp_gdb / "test_coordinates_sample"
-    result = arcpy_parquet.parquet_to_feature_class(
+    result = arcpy_parquet.parquet_to_features(
         parquet_path=pqt_path,
         output_feature_class=out_fc,
         geometry_format="COORDINATES",
@@ -588,7 +588,7 @@ def test_h3_basic(tmp_gdb, tmp_pqt):
 
     # convert to feature class
     out_fc = tmp_gdb / "test_h3_basic"
-    result = arcpy_parquet.parquet_to_feature_class(
+    result = arcpy_parquet.parquet_to_features(
         parquet_path=pqt_path,
         output_feature_class=out_fc,
         geometry_format="H3",
@@ -615,7 +615,7 @@ def test_h3_custom_column(tmp_gdb, tmp_pqt):
 
     # convert to feature class
     out_fc = tmp_gdb / "test_h3_custom"
-    result = arcpy_parquet.parquet_to_feature_class(
+    result = arcpy_parquet.parquet_to_features(
         parquet_path=pqt_path,
         output_feature_class=out_fc,
         geometry_format="H3",
@@ -642,7 +642,7 @@ def test_geoparquet_missing_metadata(tmp_gdb, tmp_pqt):
     # should raise error when trying to use GEOPARQUET format
     out_fc = tmp_gdb / "test_geoparquet_missing"
     with pytest.raises(ValueError, match="does not appear to be formatted as GeoParquet"):
-        arcpy_parquet.parquet_to_feature_class(
+        arcpy_parquet.parquet_to_features(
             parquet_path=pqt_path,
             output_feature_class=out_fc,
             geometry_format="GEOPARQUET",
@@ -684,7 +684,7 @@ def test_geoparquet_invalid_geometry_column(tmp_gdb, tmp_pqt):
     # should raise error about missing column
     out_fc = tmp_gdb / "test_invalid_geom_col"
     with pytest.raises(ValueError, match="does not exist in the dataset schema"):
-        arcpy_parquet.parquet_to_feature_class(
+        arcpy_parquet.parquet_to_features(
             parquet_path=tmp_pqt,
             output_feature_class=out_fc,
             geometry_format="GEOPARQUET",
@@ -699,7 +699,7 @@ def test_coordinates_missing_column(tmp_gdb, tmp_pqt):
     # try with non-existent column
     out_fc = tmp_gdb / "test_coords_missing"
     with pytest.raises(ValueError, match="do not appear to be in the input parquet columns"):
-        arcpy_parquet.parquet_to_feature_class(
+        arcpy_parquet.parquet_to_features(
             parquet_path=pqt_path,
             output_feature_class=out_fc,
             geometry_format="COORDINATES",
@@ -724,7 +724,7 @@ def test_coordinates_invalid_type(tmp_gdb, tmp_pqt):
     # should raise error about non-numeric type
     out_fc = tmp_gdb / "test_coords_invalid_type"
     with pytest.raises(ValueError, match="does not appear to be a numeric type"):
-        arcpy_parquet.parquet_to_feature_class(
+        arcpy_parquet.parquet_to_features(
             parquet_path=tmp_pqt,
             output_feature_class=out_fc,
             geometry_format="COORDINATES",
@@ -741,7 +741,7 @@ def test_coordinates_wrong_format(tmp_gdb, tmp_pqt):
     # try with single string instead of list
     out_fc = tmp_gdb / "test_coords_wrong_format"
     with pytest.raises(ValueError, match="must provide an iterable"):
-        arcpy_parquet.parquet_to_feature_class(
+        arcpy_parquet.parquet_to_features(
             parquet_path=pqt_path,
             output_feature_class=out_fc,
             geometry_format="COORDINATES",
@@ -758,7 +758,7 @@ def test_h3_missing_column(tmp_gdb, tmp_pqt):
     # try with non-existent column
     out_fc = tmp_gdb / "test_h3_missing"
     with pytest.raises(ValueError, match="does not appear to be in the input parquet columns"):
-        arcpy_parquet.parquet_to_feature_class(
+        arcpy_parquet.parquet_to_features(
             parquet_path=pqt_path,
             output_feature_class=out_fc,
             geometry_format="H3",
@@ -775,7 +775,7 @@ def test_h3_no_column_provided(tmp_gdb, tmp_pqt):
     # try without providing column name
     out_fc = tmp_gdb / "test_h3_no_column"
     with pytest.raises(ValueError, match="you must provide the geometry_column parameter"):
-        arcpy_parquet.parquet_to_feature_class(
+        arcpy_parquet.parquet_to_features(
             parquet_path=pqt_path,
             output_feature_class=out_fc,
             geometry_format="H3",
@@ -792,7 +792,7 @@ def test_invalid_geometry_format(tmp_gdb, tmp_pqt):
     # try with invalid format
     out_fc = tmp_gdb / "test_invalid_format"
     with pytest.raises(ValueError, match='geometry_format must be one of'):
-        arcpy_parquet.parquet_to_feature_class(
+        arcpy_parquet.parquet_to_features(
             parquet_path=pqt_path,
             output_feature_class=out_fc,
             geometry_format="INVALID_FORMAT",
@@ -816,7 +816,7 @@ def test_example_geoparquet_dataset(tmp_gdb):
     in_cnt = in_tbl.num_rows
 
     out_fc = tmp_gdb / "example_geoparquet"
-    result = arcpy_parquet.parquet_to_feature_class(
+    result = arcpy_parquet.parquet_to_features(
         parquet_path=in_pqt,
         output_feature_class=out_fc,
         geometry_format="GEOPARQUET",
@@ -840,7 +840,7 @@ def test_coordinates_with_schema(tmp_gdb):
     in_cnt = in_tbl.num_rows
 
     out_fc = tmp_gdb / "coords_with_schema"
-    result = arcpy_parquet.parquet_to_feature_class(
+    result = arcpy_parquet.parquet_to_features(
         parquet_path=coord_pqt,
         output_feature_class=out_fc,
         schema_file=coord_schm,
@@ -880,7 +880,7 @@ def test_complex_data_types(tmp_gdb, tmp_pqt):
     # add geo metadata
     import json
 
-    geo_metadata = pyarrow_utils.get_geoparquet_header(
+    geo_metadata = pyarrow_helpers.get_geoparquet_header(
         geometry_type="Point", encoding="WKB", spatial_reference=4326
     )
     schema = table.schema.with_metadata(
@@ -893,7 +893,7 @@ def test_complex_data_types(tmp_gdb, tmp_pqt):
 
     # convert to feature class
     out_fc = tmp_gdb / "test_complex_types"
-    result = arcpy_parquet.parquet_to_feature_class(
+    result = arcpy_parquet.parquet_to_features(
         parquet_path=tmp_pqt,
         output_feature_class=out_fc,
         geometry_format="GEOPARQUET",
@@ -932,7 +932,7 @@ def test_long_string_fields(tmp_gdb, tmp_pqt):
     # add geo metadata
     import json
 
-    geo_metadata = pyarrow_utils.get_geoparquet_header(
+    geo_metadata = pyarrow_helpers.get_geoparquet_header(
         geometry_type="Point", encoding="WKB", spatial_reference=4326
     )
     schema = table.schema.with_metadata(
@@ -945,7 +945,7 @@ def test_long_string_fields(tmp_gdb, tmp_pqt):
 
     # convert to feature class
     out_fc = tmp_gdb / "test_long_strings"
-    result = arcpy_parquet.parquet_to_feature_class(
+    result = arcpy_parquet.parquet_to_features(
         parquet_path=tmp_pqt,
         output_feature_class=out_fc,
         geometry_format="GEOPARQUET",
@@ -982,7 +982,7 @@ def test_roundtrip_geoparquet(tmp_gdb, tmp_pqt):
 
     # export to parquet
     tmp_pqt1 = tmp_pqt / "export"
-    arcpy_parquet.feature_class_to_parquet(
+    arcpy_parquet.features_to_parquet(
         input_table=features_poly,
         output_parquet=tmp_pqt1,
         include_geometry=True,
@@ -991,7 +991,7 @@ def test_roundtrip_geoparquet(tmp_gdb, tmp_pqt):
 
     # import back to feature class
     out_fc = tmp_gdb / "roundtrip_test"
-    result = arcpy_parquet.parquet_to_feature_class(
+    result = arcpy_parquet.parquet_to_features(
         parquet_path=tmp_pqt1,
         output_feature_class=out_fc,
         geometry_format="GEOPARQUET",
@@ -1027,7 +1027,7 @@ def test_partitioned_dataset(tmp_gdb, tmp_pqt):
             table = pa.Table.from_pydict(data)
 
             # add geo metadata
-            geo_metadata = pyarrow_utils.get_geoparquet_header(
+            geo_metadata = pyarrow_helpers.get_geoparquet_header(
                 geometry_type="Point", encoding="WKB", spatial_reference=4326
             )
             schema = table.schema.with_metadata(
@@ -1042,7 +1042,7 @@ def test_partitioned_dataset(tmp_gdb, tmp_pqt):
 
     # convert entire dataset
     out_fc = tmp_gdb / "test_partitioned"
-    result = arcpy_parquet.parquet_to_feature_class(
+    result = arcpy_parquet.parquet_to_features(
         parquet_path=tmp_pqt,
         output_feature_class=out_fc,
         geometry_format="GEOPARQUET",
@@ -1074,7 +1074,7 @@ def test_specific_partition(tmp_gdb, tmp_pqt):
         table = pa.Table.from_pydict(data)
 
         # add geo metadata
-        geo_metadata = pyarrow_utils.get_geoparquet_header(
+        geo_metadata = pyarrow_helpers.get_geoparquet_header(
             geometry_type="Point", encoding="WKB", spatial_reference=4326
         )
         schema = table.schema.with_metadata(
@@ -1088,7 +1088,7 @@ def test_specific_partition(tmp_gdb, tmp_pqt):
 
     # convert only 2024 partition
     out_fc = tmp_gdb / "test_partition_2024"
-    result = arcpy_parquet.parquet_to_feature_class(
+    result = arcpy_parquet.parquet_to_features(
         parquet_path=tmp_pqt,
         output_feature_class=out_fc,
         parquet_partitions="year=2024",
@@ -1097,3 +1097,4 @@ def test_specific_partition(tmp_gdb, tmp_pqt):
 
     # validate - should have only 2024 records
     validate_feature_class(result, expected_shape_type="Point", expected_count=10)
+

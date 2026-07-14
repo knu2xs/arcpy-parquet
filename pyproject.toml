@@ -16,7 +16,9 @@ classifiers = [
     "License :: OSI Approved :: Apache Software License",
 ]
 license = {file = "LICENSE"}
-dependencies = []
+dependencies = [
+  h3-py
+]
 
 [tool.setuptools.packages.find]
 where = ["src"]

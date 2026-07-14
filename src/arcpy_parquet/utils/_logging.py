@@ -11,11 +11,12 @@ License: Apache 2.0
 Copyright 2024
 Version: 1.0.0
 """
+
 import logging
 from pathlib import Path
 from typing import Union, Optional
 
-from .main import has_arcpy
+from .__main__ import has_arcpy
 
 __all__ = ["get_logger", "format_pandas_for_logging"]
 

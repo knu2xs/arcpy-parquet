@@ -9,17 +9,15 @@ import pytest
 pytest.importorskip("arcpy")
 
 
-def test_public_geoparquet_exports_are_callable() -> None:
-    """Validate new API exports are importable and callable objects."""
+def test_public_parquet_exports_are_callable() -> None:
+    """Validate primary API exports are importable and callable objects."""
     from arcpy_parquet import (
-        features_to_geoparquet,
-        geoparquet_to_features,
-        get_geometry_columns,
+        features_to_parquet,
+        parquet_to_features,
     )
 
-    assert callable(features_to_geoparquet)
-    assert callable(geoparquet_to_features)
-    assert callable(get_geometry_columns)
+    assert callable(features_to_parquet)
+    assert callable(parquet_to_features)
 
 
 @pytest.mark.skip(reason="Requires ArcPy dataset fixtures for integration execution.")

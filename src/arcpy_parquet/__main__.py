@@ -1,6 +1,11 @@
-__all__ = ["create_schema_file", "parquet_to_feature_class", "feature_class_to_parquet"]
+__all__ = [
+    "create_schema_file",
+    "features_to_parquet",
+    "parquet_to_features",
+]
 
 import importlib.util
+import importlib
 import json
 from datetime import timedelta
 from pathlib import Path
@@ -15,110 +20,250 @@ import pyarrow.parquet as pq
 from tqdm import tqdm
 
 from .utils import get_logger, pyarrow_utils
-from .utils.pyarrow_utils import (
+from .utils._pyarrow import (
     get_geoparquet_header,
     get_parquet_max_string_lengths,
 )
+from .utils._h3 import h3_value_from_geometry
 
 # set up logging
 logger = get_logger(level="DEBUG", logger_name="arcpy_parquet.main")
 
-# dictionary for handling input geometry types
-geom_dict = {
-    "COORDINATES": ("POINT", "DISABLED", "DISABLED"),
-    "H3": ("POLYGON", "DISABLED", "DISABLED"),
-    "POINT": ("POINT", "DISABLED", "DISABLED"),
-    "POINT M": ("POINT", "ENABLED", "DISABLED"),
-    "POINT Z": ("POINT", "DISABLED", "ENABLED"),
-    "POLYLINE": ("POLYLINE", "DISABLED", "DISABLED"),
-    "POLYLINE M": ("POLYLINE", "ENABLED", "DISABLED"),
-    "POLYLINE Z": ("POLYLINE", "DISABLED", "ENABLED"),
-    "POLYGON": ("POLYGON", "DISABLED", "DISABLED"),
-    "POLYGON M": ("POLYGON", "ENABLED", "DISABLED"),
-    "POLYGON Z": ("POLYGON", "DISABLED", "ENABLED"),
-    "MULTIPOINT": ("MULTIPOINT", "DISABLED", "DISABLED"),
-    "MULTIPOINT M": ("MULTIPOINT", "ENABLED", "DISABLED"),
-    "MULTIPOINT Z": ("MULTIPOINT", "DISABLED", "ENABLED"),
-}
 
-# mapping data types for going from pyarrow to a feature class
-import_dtype_dict = {
-    "int8": "INTEGER",
-    "int16": "INTEGER",
-    "int32": "INTEGER",
-    "int64": "LONG",
-    "float": "DOUBLE",
-    "double": "DOUBLE",
-    "times": "DATE",
-    "decim": "DOUBLE",
-    "decimal": "DOUBLE",
-    "string": "TEXT",
-    "long_string": "TEXT",
-    "utf8": "TEXT",
-    "long_utf8": "TEXT",
-    "date": "DATE",
-    "date32[day]": "DATE",
-}
-
-# mapping data types for going from a feature class to parquet
-export_dtype_dict = {
-    "OID": pa.int64(),
-    "Date": pa.timestamp("s"),
-    "Double": pa.float64(),
-    "Integer": pa.int64(),
-    "Single": pa.float32(),
-    "SmallInteger": pa.int16(),
-    "Blob": pa.large_binary(),
-    "String": pa.string(),
-}
-
-
-def feature_class_to_parquet(
-    input_table: Path,
-    output_parquet: Path,
-    partition_columns: Optional[Union[list[str], str]] = None,
-    include_geometry: bool = True,
-    geometry_format: Literal["WKB"] = "WKB",
-    batch_size: int = 300000,
+def create_schema_file(
+    input_dataset: Optional[Union[Path, str]] = None,
+    output_schema_file: Optional[Union[Path, str]] = None,
+    template_feature_class_path: Optional[Union[Path, str]] = None,
 ) -> Path:
-    """
-    Export a Feature Class to Parquet with options for exporting to Geoparquet.
+    """Create a CSV schema file suitable for parquet_to_features imports.
+
+    This utility inspects either ArcGIS-native tabular data (feature class/table)
+    or a Parquet dataset and writes a schema CSV that can be supplied to
+    parquet_to_features through its schema_file parameter.
+
+    For ArcGIS-native data sources, field metadata is taken directly from
+    arcpy.ListFields. For Parquet inputs, the function derives ArcPy-compatible
+    names and types from the Arrow schema and infers text lengths using
+    get_parquet_max_string_lengths.
+
+    !!! note
+        The generated schema file is intended to control field creation during
+        import. It does not transform source data itself.
+
+    !!! warning
+        OID, Geometry, and Raster fields are intentionally excluded from
+        schema generation because they are managed separately by ArcGIS.
+
+    ``` python
+    schema_csv = create_schema_file(
+        input_dataset=r"data/sample/main_fgdb_sample/parquet",
+        output_schema_file=r"data/interim/schema/main_fgdb_sample.csv",
+    )
+    ```
 
     Args:
-        input_table: Path to feature class or table.
-        output_parquet: Path to where the output Parquet file will be saved.
-        partition_columns: List of columns to use for partitioning the output Parquet dataset.
-        include_geometry: Whether to include the geometry in the output Parquet dataset.
-        geometry_format: If including the geometry, what format the geometry should be in, either
-            ``XY``, or ``WKB``. Default is ``WKB``.
-        batch_size: Count of records per ``part-*.parquet`` file.
+        input_dataset: Path to a source dataset. Supported inputs include an
+            ArcGIS table/feature class path or a Parquet dataset directory/file.
+        output_schema_file: Destination CSV path to write. Parent directories
+            are created automatically when missing.
+        template_feature_class_path: Backward-compatible alias for
+            input_dataset. Used when older callers provide a template feature
+            class path with the legacy parameter name.
+
+    Returns:
+        Path: Path to the written schema CSV.
+
+    Raises:
+        ValueError: If output_schema_file is missing.
+        ValueError: If neither input_dataset nor template_feature_class_path
+            is provided.
+        ValueError: If the resolved input path does not exist.
+        ValueError: If no writable fields are found when reading an ArcGIS
+            dataset.
     """
+    if output_schema_file is None:
+        raise ValueError("output_schema_file is required.")
+
+    if input_dataset is None:
+        input_dataset = template_feature_class_path
+
+    if input_dataset is None:
+        raise ValueError(
+            "You must provide input_dataset (or template_feature_class_path)."
+        )
+
+    dataset_path = Path(input_dataset)
+    schema_path = Path(output_schema_file)
+    schema_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # Build schema directly from ArcPy fields when the input is a geodatabase table/feature class.
+    if arcpy.Exists(str(dataset_path)):
+        try:
+            field_rows = []
+            for fld in arcpy.ListFields(str(dataset_path)):
+                if fld.type in ("OID", "Geometry", "Raster"):
+                    continue
+
+                field_type = (
+                    "TEXT" if fld.type.lower() == "string" else fld.type.upper()
+                )
+                field_rows.append(
+                    {
+                        "field_name": fld.name,
+                        "field_type": field_type,
+                        "field_length": fld.length if field_type == "TEXT" else None,
+                        "field_alias": fld.aliasName,
+                    }
+                )
+
+            if not field_rows:
+                raise ValueError(
+                    f"No writable fields found in input dataset: {dataset_path}"
+                )
+
+            pd.DataFrame(field_rows).to_csv(schema_path, encoding="utf-8", index=False)
+            return schema_path
+        except RuntimeError:
+            # ArcPy can report Exists=True for paths that are not ArcPy-readable tables.
+            # In that case, continue and treat the input as parquet.
+            pass
+
+    # Otherwise treat input as parquet and infer a schema CSV suitable for parquet_to_features.
+    if not dataset_path.exists():
+        raise ValueError(f"Cannot locate input_dataset at {dataset_path}.")
+
+    try:
+        parquet_dataset = pq.ParquetDataset(dataset_path)
+    except pa.ArrowTypeError as err:
+        logger.warning(
+            "Encountered ArrowTypeError while loading ParquetDataset with Hive partitioning: %s. "
+            "Falling back to partitioning=None.",
+            err,
+        )
+        parquet_dataset = pq.ParquetDataset(dataset_path, partitioning=None)
+
+    schema_dict = pyarrow_utils.get_schema_dict(parquet_dataset.schema)
+    max_lengths = get_parquet_max_string_lengths(parquet_dataset)
+
+    rows = []
+    for src_name, props in schema_dict.items():
+        pa_type = props.get("type", "string")
+        field_type = pyarrow_utils.import_dtype_dict.get(pa_type, "TEXT")
+        row = {
+            "field_name": props.get("arcpy_name", src_name),
+            "field_type": field_type,
+            "field_alias": src_name,
+            "field_length": None,
+        }
+        if field_type == "TEXT":
+            row["field_length"] = int(max_lengths.get(src_name, 512) or 512)
+        rows.append(row)
+
+    pd.DataFrame(rows).to_csv(schema_path, encoding="utf-8", index=False)
+    return schema_path
+
+
+def features_to_parquet(
+    input_features: Union[Path, str],
+    output_parquet: Union[Path, str],
+    partition_columns: Optional[Union[list[str], str]] = None,
+    include_geometry: Optional[bool] = True,
+    geometry_format: Optional[
+        Literal["GEOPARQUET", "H3", "XY", "GEOJSON", "JSON"]
+    ] = "GEOPARQUET",
+    h3_resolution: Optional[int] = 9,
+    batch_size: Optional[int] = 300000,
+) -> Path:
+    """Export ArcGIS features/tables into a partition-capable Parquet dataset.
+
+    The function reads source rows in batches with an ArcPy search cursor,
+    maps ArcGIS field types into Arrow types, and writes compressed Parquet
+    parts (optionally partitioned). Geometry output is configurable and can be
+    emitted as GeoParquet geometry, XY columns, GeoJSON, or H3 indices.
+
+    !!! note
+        WKB is not accepted as a top-level geometry_format option. Use
+        GEOPARQUET for standards-compliant GeoParquet output, which encodes
+        geometry as WKB internally and writes GeoParquet metadata.
+
+    !!! note
+        When geometry_format is H3, coordinate order is handled as
+        latitude/longitude for H3 operations even though ArcGIS geometry is
+        represented as X/Y.
+
+    !!! warning
+        Very small batch_size values can increase I/O overhead substantially.
+        Extremely large values can increase memory pressure.
+
+    ``` python
+    dataset_dir = features_to_parquet(
+        input_features=r"data/sample/sample.gdb/wa_h3_09",
+        output_parquet=r"data/interim/wa_h3_09_parquet",
+        geometry_format="GEOPARQUET",
+        partition_columns=["h3_06"],
+        batch_size=300000,
+    )
+    ```
+
+    Args:
+        input_features: Path to an ArcGIS feature class or table.
+        output_parquet: Directory where output Parquet data is written. The
+            directory is created when it does not already exist.
+        partition_columns: Optional partition column name(s). When provided,
+            output is written with pq.write_to_dataset using these columns.
+        include_geometry: If True, geometry output fields are included according
+            to geometry_format. If False, geometry is omitted entirely.
+        geometry_format: Geometry representation in the output. Supported
+            values are GEOPARQUET, H3, XY, and GEOJSON. JSON is normalized to
+            GEOJSON by the format normalizer.
+        h3_resolution: H3 resolution used when geometry_format is H3.
+        batch_size: Number of records buffered before writing each part file.
+
+    Returns:
+        Path: Output Parquet dataset directory path.
+
+    Raises:
+        ValueError: If input_features does not exist.
+        ValueError: If geometry_format is invalid.
+        ValueError: If partition_columns contains fields not present in the
+            source dataset.
+        EnvironmentError: If H3 export is requested but h3-py is unavailable or
+            incompatible with required 4.x APIs.
+    """
+    output_parquet = Path(output_parquet)
+
+    geometry_format = pyarrow_utils.normalize_export_geometry_format(geometry_format)
+
     # downgrade path so arcpy can use strings
-    fc_pth = str(input_table)
+    fc_pth = str(input_features)
 
     # ensure source exists
     if not arcpy.Exists(fc_pth):
-        raise ValueError(f"The input path {input_table} does not appear to exist.")
+        raise ValueError(f"The input path {input_features} does not appear to exist.")
 
-    # check the geometry output type
-    geometry_format = geometry_format.upper()
+    # describe the data to access properties for validation
+    desc = arcpy.da.Describe(fc_pth)
 
-    # TODO: add support for GeoJSON geometry format
-    if geometry_format in ("GEOJSON", "JSON"):
-        raise NotImplementedError(
-            "Support for encoding Geoparquet geometry as GeoJSON is not yet implemented."
-        )
+    h3_module = None
+    input_shape_type = (desc.get("shapeType") or "").upper()
 
-    # ensure geometry format is supported
-    if geometry_format not in ("XY", "WKB"):
-        raise ValueError('geometry_format must be one of "XY" or "WKB".')
+    if include_geometry and geometry_format == "H3":
+        if importlib.util.find_spec("h3") is None:
+            raise EnvironmentError(
+                "geometry_format='H3' requires the h3-py package, but it is not installed in "
+                "the current environment. Install h3-py to enable H3 export."
+            )
+        h3_module = importlib.import_module("h3")
+
+        if not hasattr(h3_module, "latlng_to_cell"):
+            raise EnvironmentError(
+                "geometry_format='H3' requires h3-py 4.x. The installed package does not "
+                "expose latlng_to_cell."
+            )
 
     # make sure the full output path exists where the data will be saved
     if not output_parquet.exists():
         output_parquet.mkdir(parents=True)
-
-    # describe the data to access properties for validation
-    desc = arcpy.da.Describe(fc_pth)
 
     # fields to be excluded
     exclude_fld_typ = ["Raster"]
@@ -163,7 +308,8 @@ def feature_class_to_parquet(
         if f.name not in exclude_fld_lst and f.type not in pa_fld_typ_xcld
     ]
     pa_typ_lst = [
-        (f.name, export_dtype_dict.get(f.type, pa.string())) for f in pa_fld_lst
+        (f.name, pyarrow_utils.export_dtype_dict.get(f.type, pa.string()))
+        for f in pa_fld_lst
     ]
     pq_schema = pa.schema(pa_typ_lst)
 
@@ -178,23 +324,30 @@ def feature_class_to_parquet(
         # if just outputting centroid (point coordinates)
         if geometry_format == "XY":
             # add X and Y columns to search cursor list and the output schema
-            for prt in ["X", "Y"]:
+            for prt, out_col in [("X", "x_lon"), ("Y", "y_lat")]:
                 sc_col_lst.append(f"{geom_nm}@{prt}")
-                pq_schema = pq_schema.append(pa.field(f"geometry_{prt}", pa.float64()))
+                pq_schema = pq_schema.append(pa.field(out_col, pa.float64()))
 
         # if working with any other output type, just use the specific output format
         else:
-            # TODO: add support for GeoJSON geometry formats
-            # add the correct search cursor type
-            sc_col_lst.append(f"{geom_nm}@{geometry_format}")
+            if geometry_format == "GEOPARQUET":
+                geom_token = "WKB"
+                geom_column_name = "geometry"
+                geom_arrow_type = pa.binary()
+            elif geometry_format == "GEOJSON":
+                geom_token = "JSON"
+                geom_column_name = "geojson"
+                geom_arrow_type = pa.string()
+            else:  # H3
+                geom_token = "@"
+                geom_column_name = "h3_index"
+                geom_arrow_type = pa.string()
 
-            # add the geometry to the output schema
-            pq_schema = pq_schema.append(
-                pa.field(f"{geometry_format.lower()}", pa.binary())
-            )
+            sc_col_lst.append(f"{geom_nm}@{geom_token}")
+            pq_schema = pq_schema.append(pa.field(geom_column_name, geom_arrow_type))
 
             # get the spatial reference and geometry type from the input features
-            desc = arcpy.da.Describe(str(input_table))
+            desc = arcpy.da.Describe(str(input_features))
             in_sr = desc.get("spatialReference")
             geom_typ = desc.get("shapeType")
 
@@ -203,7 +356,7 @@ def feature_class_to_parquet(
         sc_col_lst.remove(desc["shapeFieldName"])
 
     # get values from the data to track progress
-    max_range = int(arcpy.management.GetCount(str(input_table))[0])
+    max_range = int(arcpy.management.GetCount(str(input_features))[0])
     rep_range = max(1, max_range // 100)
 
     # report progress
@@ -220,13 +373,13 @@ def feature_class_to_parquet(
     # prepend geometry onto search cursor fields if outputting geometry
     if (
         include_geometry
-        and geometry_format != "XY"
+        and geometry_format == "GEOPARQUET"
         and desc.get("shapeFieldName") is not None
     ):
         sc_col_lst = [f"{desc.get('shapeFieldName')}@"] + sc_col_lst
 
     # create a search cursor to work through the data
-    with arcpy.da.SearchCursor(str(input_table), sc_col_lst) as search_cur:
+    with arcpy.da.SearchCursor(str(input_features), sc_col_lst) as search_cur:
         # variable for batch numbering
         prt_num = 0
 
@@ -236,7 +389,7 @@ def feature_class_to_parquet(
         # begin to iterate through the features
         for idx, row in enumerate(search_cur):
             # pull the geometry object out of the row, and get the extent if including geometry
-            if include_geometry and geometry_format != "XY":
+            if include_geometry and geometry_format == "GEOPARQUET":
                 geom = row[0]
                 if geom is not None and isinstance(geom, arcpy.Geometry):
                     ext = geom.extent
@@ -256,6 +409,13 @@ def feature_class_to_parquet(
 
             # add each row column partition_column_list to the respective key in the dictionary
             for col, val in zip(pq_schema.names, row):
+                if include_geometry and geometry_format == "H3" and col == "h3_index":
+                    val = h3_value_from_geometry(
+                        geom=val,
+                        input_shape_type=input_shape_type,
+                        h3_module=h3_module,
+                        h3_resolution=h3_resolution,
+                    )
                 pa_dict[col].append(val)
 
             # if at a percent interval
@@ -270,16 +430,19 @@ def feature_class_to_parquet(
             # if at a batch size (part) interval or end of dataset
             if (idx + 1) % batch_size == 0 or (idx + 1) == max_range:
                 # if writing geoparquet, add the metadata to the schema
-                if include_geometry and geometry_format != "XY":
+                if include_geometry and geometry_format == "GEOPARQUET":
                     # get the geoparquet header
+                    geoparquet_col = "geometry"
                     gpqt_dict = get_geoparquet_header(
                         geometry_type=geom_typ,
-                        encoding=geometry_format,
+                        encoding="WKB",
                         spatial_reference=in_sr,
-                        bounding_box=[x_min, y_min, x_max, y_max]
-                        if None not in (x_min, y_min, x_max, y_max)
-                        else None,
-                        column_name=geometry_format.lower(),
+                        bounding_box=(
+                            [x_min, y_min, x_max, y_max]
+                            if None not in (x_min, y_min, x_max, y_max)
+                            else None
+                        ),
+                        column_name=geoparquet_col,
                     )
 
                     # add the spatial reference to the metadata
@@ -299,7 +462,6 @@ def feature_class_to_parquet(
                         table=pa_tbl,
                         root_path=output_parquet,
                         partition_cols=partition_columns,
-                        version="2.0",
                         compression="snappy",
                     )
 
@@ -311,7 +473,6 @@ def feature_class_to_parquet(
                     pq.write_table(
                         table=pa_tbl,
                         where=str(part_pth),
-                        version="2.0",
                         flavor="spark_session",
                         compression="snappy",
                     )
@@ -350,17 +511,11 @@ def h3_index_to_geometry(h3_index: str, geometry_type: Optional[str] = "polygon"
             "Creating H3 geometries from H3 indices requires the h3-py package to be installed in "
             "the current environment."
         )
-    import h3
-    from h3.api import basic_int as h3_int
-
-    # detect type of h3 index, integer or hexadecimal
-    if isinstance(h3_index, int):
-        h3_typ = "int"
-    elif h3_index.isnumeric():
-        h3_typ = "int"
-        h3_index = int(h3_index)
-    else:
-        h3_typ = "hex"
+    h3 = importlib.import_module("h3")
+    if not (hasattr(h3, "cell_to_latlng") and hasattr(h3, "cell_to_boundary")):
+        raise EnvironmentError(
+            "h3_index_to_geometry requires h3-py 4.x APIs (cell_to_latlng and cell_to_boundary)."
+        )
 
     # all coordinates are in WGS84
     sr = arcpy.SpatialReference(4326)
@@ -372,20 +527,14 @@ def h3_index_to_geometry(h3_index: str, geometry_type: Optional[str] = "polygon"
     try:
         if geometry_type == "point":
             # get the coordinates
-            if h3_typ == "int":
-                y, x = h3_int.h3_to_geo(h3_index)
-            else:
-                y, x = h3.h3_to_geo(h3_index)
+            y, x = h3.cell_to_latlng(h3_index)
 
             # create a point geometry
             geom = arcpy.PointGeometry(arcpy.Point(x, y), spatial_reference=sr)
 
         elif geometry_type == "poly" or geometry_type == "polygon":
             # get the tuple of tuples with the bounding coordinates for the h3 index polygon boundary
-            if h3_typ == "int":
-                h3_boundary = h3_int.h3_to_geo_boundary(h3_index)
-            else:
-                h3_boundary = h3.h3_to_geo_boundary(h3_index)
+            h3_boundary = h3.cell_to_boundary(h3_index)
 
             # switch the coordinate order for esri geometry
             h3_boundary = reversed(h3_boundary)
@@ -410,7 +559,7 @@ def h3_index_to_geometry(h3_index: str, geometry_type: Optional[str] = "polygon"
     return geom
 
 
-def parquet_to_feature_class(
+def parquet_to_features(
     parquet_path: Path,
     output_feature_class: Path,
     schema_file: Optional[Path] = None,
@@ -419,45 +568,75 @@ def parquet_to_feature_class(
     ] = "GEOPARQUET",
     parquet_partitions: Optional[str] = None,
     geometry_column: Optional[Union[List[str], str]] = None,
-    spatial_reference: Union[arcpy.SpatialReference, str, int] = 4326,
+    spatial_reference: Optional[Union[arcpy.SpatialReference, str, int]] = 4326,
     sample_count: Optional[int] = None,
-    build_spatial_index: bool = True,
-    compact: bool = True,
+    build_spatial_index: Optional[bool] = True,
+    compact: Optional[bool] = True,
 ) -> Path:
-    """
-    Convert a *properly formatted* Parquet source into a Feature Class in a Geodatabase.
+    """Convert Parquet or GeoParquet datasets into an ArcGIS feature class.
+
+    This function reads from a Parquet dataset (or specific partition),
+    builds a destination feature class schema, then inserts rows in batches
+    using an ArcPy insert cursor. It supports three geometry interpretation
+    modes:
+
+    - GEOPARQUET: Reads geometry from GeoParquet metadata + primary geometry
+      column.
+    - COORDINATES: Creates point geometry from user-specified X/Y columns.
+    - H3: Creates polygon geometry from an H3 index column.
 
     !!! note
-        The geometry *must* be encoded as well known binary (WKB), and complex field types
-        such as arrays and structs are not supported.
+        Complex Arrow types (arrays/structs) are stringified for import.
 
     !!! note
-        When converting GeoParquet files with multiple geometry columns, only the primary 
-        geometry column will be used. Other geometry columns will be ignored and not added 
-        as fields to the feature class.
+        For GeoParquet with multiple geometry columns, only the metadata-defined
+        primary column is used for geometry creation.
+
+    !!! warning
+        If a schema_file is supplied with mismatched field names or insufficient
+        text lengths, field creation may still succeed but can truncate values
+        depending on geodatabase rules.
+
+    ``` python
+    out_fc = parquet_to_features(
+        parquet_path=r"data/sample/geoparquet_example",
+        output_feature_class=r"data/interim/interim.gdb/geoparquet_example",
+        geometry_format="GEOPARQUET",
+        build_spatial_index=True,
+    )
+    ```
 
     Args:
-        parquet_path: The directory or Parquet part file to convert.
-        output_feature_class: Where to save the new Feature Class.
-        schema_file: CSV file with detailed schema properties.
-        geometry_format: `GEOPARQUET`, `COORDINATES` or `H3` describing the geometry type. `COORDINATES`, is a point
-            geometry type described by two coordinate columns. `H3` is a column containing H3 indices as hexadecimal
-            strings. Polygon geometries will be created based on the H3 indices for the rows. Default is `GEOPARQUET`.
-        parquet_partitions: Hive partition name and values, if available, to select. For instance,
-            if partitioned year and month with year=2023 and month=01, this would be year=2023/month=01.
-        geometry_column: If the geometry type is `GEOPARQUET`, this parameter will be ignored. If the geometry type
-            is ``COORDINATES``, this must be an iterable (tuple or list) of the x (longitude) and y (latitude)
-            columns containing the coordinates. If the geometry type is `H3`, this must be a string with the name
-            of the H3 index column.
-        spatial_reference: Spatial reference of input data. Default is WGS84 (WKID: 4326). If the geometry type
-            is `GEOPARQUET`, this parameter will be ignored if the spatial reference is available in the parquet
-            metadata. However, if the metadata is missing or incomplete, this parameter will be used to define the
-            spatial reference.
-        sample_count: If only wanting to import enough data to understand the schema, specify
-            the count of records with this parameter. If left blank, will import all records.
-        build_spatial_index: Optional if desired to build the spatial index once inserting all the data.
-            Default is ``False``.
-        compact: If the File Geodatabase should be compacted following import. Default is ``True``.
+        parquet_path: Path to a Parquet dataset directory or individual Parquet
+            part file.
+        output_feature_class: Destination feature class path (typically in a
+            file geodatabase).
+        schema_file: Optional CSV schema definition used to control field
+            aliases, lengths, and types during field creation.
+        geometry_format: Geometry interpretation mode: GEOPARQUET,
+            COORDINATES, or H3.
+        parquet_partitions: Optional hive-style partition selector, for example
+            year=2023/month=01.
+        geometry_column: Geometry source column definition. Ignored for
+            GEOPARQUET. Required for COORDINATES (x/y pair) and H3 (single
+            column name).
+        spatial_reference: Target spatial reference. For GEOPARQUET, metadata
+            SR is preferred when present.
+        sample_count: Optional row limit for partial imports.
+        build_spatial_index: If True, build a spatial index on the output
+            feature class after load.
+        compact: If True, compact the destination geodatabase after load.
+
+    Returns:
+        Path: Output feature class path.
+
+    Raises:
+        ValueError: If geometry_format is unsupported.
+        ValueError: If parquet_partitions is invalid or not present.
+        ValueError: If required geometry columns are missing or incompatible
+            with the selected geometry_format.
+        ValueError: If GeoParquet metadata is required but missing/inconsistent
+            when geometry_format is GEOPARQUET.
     """
     # if used as a tool in pro, let user know what is going on...kind of
     arcpy.SetProgressorLabel("Warming up the Flux Capacitor...")
@@ -490,8 +669,22 @@ def parquet_to_feature_class(
         else Path(output_feature_class)
     )
 
+    def _open_parquet_dataset(
+        dataset_path: Path, filters: Optional[list[tuple]] = None
+    ) -> pq.ParquetDataset:
+        """Open ParquetDataset with Hive partitioning first, then safe fallback."""
+        try:
+            return pq.ParquetDataset(dataset_path, filters=filters)
+        except pa.ArrowTypeError as err:
+            logger.warning(
+                "Encountered ArrowTypeError while loading ParquetDataset with Hive partitioning: %s. "
+                "Falling back to partitioning=None.",
+                err,
+            )
+            return pq.ParquetDataset(dataset_path, filters=filters, partitioning=None)
+
     # create a PyArrow Dataset to read from
-    dataset = pq.ParquetDataset(parquet_path, use_legacy_dataset=False)
+    dataset = _open_parquet_dataset(parquet_path)
     # dataset = ds.dataset(parquet_path, format="parquet")
 
     # get the list of available partitions in the parquet data
@@ -510,7 +703,7 @@ def parquet_to_feature_class(
         partition_parts = (prt.split("=") for prt in Path(parquet_partitions).parts)
 
         # create a dictionary of the partition parts
-        partition_dict = {k: v for k, v in partition_parts}
+        partition_dict = {k: pyarrow_utils.format_value(v) for k, v in partition_parts}
 
         if partition_dict not in available_partitions:
             raise ValueError(
@@ -522,10 +715,13 @@ def parquet_to_feature_class(
         # create a filter expression from the provided partition dictionary
         fltr = pyarrow_utils.get_partition_expression(partition_dict)
 
-        # filter the dataset to only the specified partitions
-        dataset = pq.ParquetDataset(
-            parquet_path, filters=fltr, use_legacy_dataset=False
-        )
+        # prefer opening the specific partition path directly to avoid partition inference issues
+        partition_path = parquet_path / Path(parquet_partitions)
+        if partition_path.exists():
+            dataset = _open_parquet_dataset(partition_path)
+        else:
+            # fallback to dataset filtering if partition subpath is not directly addressable
+            dataset = _open_parquet_dataset(parquet_path, filters=fltr)
 
     # get a dictionary for handling the schema properties
     schema_dict = pyarrow_utils.get_schema_dict(dataset.schema)
@@ -534,8 +730,8 @@ def parquet_to_feature_class(
     complex_cols = pyarrow_utils.get_complex_columns(dataset)
 
     # introspect geometry columns from the geoparquet metadata
-    primary_geom_col, all_geom_cols = pyarrow_utils.introspect_geoparquet_geometry_columns(
-        dataset.schema
+    primary_geom_col, all_geom_cols = (
+        pyarrow_utils.introspect_geoparquet_geometry_columns(dataset.schema)
     )
 
     # if any complex columns, create a table with just those columns to interrogate
@@ -606,7 +802,7 @@ def parquet_to_feature_class(
 
         # get the primary geometry column name
         geometry_column = primary_geom_col
-        pa_cursor_geom = geometry_column
+        pa_cursor_geom = [geometry_column]
 
         # set the cursor geometry token
         arcpy_cursor_geom = "SHAPE@WKB"
@@ -984,8 +1180,10 @@ def parquet_to_feature_class(
                         remain_str = str(timedelta(seconds=est_remain_time.seconds))
 
                     # build the message
-                    msg = (f"Imported {added_cnt:,} rows at a rate of {rate:,} per hour. Estimated time "
-                           f"remaining: {remain_str}.")
+                    msg = (
+                        f"Imported {added_cnt:,} rows at a rate of {rate:,} per hour. Estimated time "
+                        f"remaining: {remain_str}."
+                    )
 
                     # set the progressor label
                     arcpy.SetProgressorLabel(msg)
@@ -1022,104 +1220,3 @@ def parquet_to_feature_class(
         logger.info("Successfully compacted data.")
 
     return output_feature_class
-
-
-def create_schema_file(input_dataset: Path, output_schema_file: Path) -> Path:
-    """
-    Create a CSV Schema file for use with ``parquet_to_feature_class``.
-
-    Args:
-        input_dataset: Path to Feature Class or Parquet dataset with schema to describe.
-        output_schema_file: Path where the CSV schema file will be stored.
-    """
-    # columns to include in the schema file
-    param_keys = [
-        "field_name",
-        "field_type",
-        "field_precision",
-        "field_scale",
-        "field_length",
-        "field_alias",
-        "field_is_nullable",
-        "field_is_required",
-        "field_domain",
-    ]
-
-    # if a feature class, read using arcpy
-    if arcpy.da.Describe(str(input_dataset)).get("type") == "FeatureClass":
-        # read the fields from the feature class
-        fld_lst = [
-            fld
-            for fld in arcpy.ListFields(str(input_dataset))
-            if fld.type != "OID" and fld.type != "Geometry"
-        ]
-
-        # properties and keys to use
-        desc_keys = [
-            "name",
-            "type",
-            "precision",
-            "scale",
-            "length",
-            "aliasName",
-            "isNullable",
-            "required",
-            "domain",
-        ]
-
-        # dump all the properties into a list of property sets
-        prop_lst = [[getattr(fld, k) for k in desc_keys] for fld in fld_lst]
-
-        # create a dataframe to make creating the CSV easier
-        schema_df = pd.DataFrame(prop_lst, columns=param_keys)
-
-    # if a parquet dataset, read using pyarrow
-    else:
-        # create a PyArrow Dataset to read from
-        pqt_ds = pq.ParquetDataset(input_dataset, use_legacy_dataset=False)
-
-        # get a list of the string column types and field aliases from parquet
-        col_typ_lst, attr_alias_lst = zip(
-            *[
-                (str(c.type.value_type), c.name)
-                if isinstance(c.type, pa.DictionaryType)
-                else (str(c.type), c.name)
-                for c in pqt_ds.schema
-            ]
-        )
-
-        # prepend any column names starting with a number with an 'c' and save as the field names
-        attr_nm_lst = [f"c{c}" if c[0].isdigit() else c for c in attr_alias_lst]
-
-        # use these to map to esri field types
-        fld_typ_lst = [import_dtype_dict[typ] for typ in col_typ_lst]
-
-        # get the maximum string lengths from the parquet data for use in field creation
-        schema_dict = get_parquet_max_string_lengths(pqt_ds)
-
-        # create a dataframe to make creating the CSV easier
-        schema_df = pd.DataFrame(
-            [
-                [
-                    nm,
-                    typ,
-                    None,
-                    None,
-                    schema_dict.get(nm, 512) if typ == "TEXT" else None,
-                    alias,
-                    "NULLABLE",
-                    "NULLABLE",
-                    None,
-                ]
-                for nm, alias, typ in zip(attr_nm_lst, attr_alias_lst, fld_typ_lst)
-            ],
-            columns=param_keys,
-        )
-
-        # ensure field lengths are integers
-        schema_df["field_length"] = schema_df["field_length"].astype(pd.Int64Dtype())
-
-    # write to a file
-    schema_df.to_csv(output_schema_file, encoding="utf-8", index=False)
-
-    return output_schema_file
