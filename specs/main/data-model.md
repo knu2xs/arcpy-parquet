@@ -31,14 +31,14 @@
   - `columns` (list[ColumnDescriptor]): Physical/logical schema descriptors.
 - Validation rules:
   - Must include required `geo` metadata keys for conforming output.
-  - Primary geometry column must be WKB-encoded.
+  - Primary geometry column in GeoParquet output is WKB-encoded.
 
 ## Entity: GeometryColumnDescriptor
 
 - Purpose: Logical description of geometry columns for import/export behavior.
 - Fields:
   - `name` (string): Column name.
-  - `encoding` (enum): Expected `WKB`.
+  - `encoding` (enum): Expected `WKB` for GeoParquet geometry encoding.
   - `geometry_types` (list[string]): Declared geometry type set.
   - `crs` (object | null): CRS payload from metadata.
   - `is_primary` (bool): Primary geometry selector.

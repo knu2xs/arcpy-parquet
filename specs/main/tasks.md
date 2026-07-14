@@ -49,7 +49,7 @@
 
 ### Implementation for User Story 1
 
-- [X] T016 [US1] Implement `features_to_geoparquet` with WKB encoding and metadata writing in `src/arcpy_parquet/geoparquet.py`.
+- [X] T016 [US1] Implement `features_to_parquet` with GeoParquet metadata writing (`GEOPARQUET`, WKB internally) in `src/arcpy_parquet/__main__.py`.
 - [X] T017 [US1] Implement `geoparquet_to_features` with primary/explicit geometry-column selection in `src/arcpy_parquet/geoparquet.py`.
 - [X] T018 [US1] Implement `get_geometry_columns` deterministic output behavior in `src/arcpy_parquet/geoparquet.py`.
 - [X] T019 [US1] Implement explicit partition value normalization and deterministic fallback behavior in `src/arcpy_parquet/geoparquet.py`.

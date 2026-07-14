@@ -3,6 +3,11 @@ site_name: ArcPy Parquet 0.2.0.dev0
 docs_dir: mkdocs
 site_dir: ../docs
 
+nav:
+  - Home: index.md
+  - ArcGIS Pro Toolbox: toolbox.md
+  - Python API: api.md
+
 # example of how to manually specify navigation if desired
 # nav:
 #   - Home: index.md
@@ -80,8 +85,6 @@ plugins:
       # explicitly enable generation of objects.ini facilitating intersphinx mapping
       enable_inventory: true
 
-      show_root_heading: false
-
       default_handler: python
 
       handlers:
@@ -97,6 +100,15 @@ plugins:
           - https://scikit-learn.org/stable/objects.inv
 
           options:
+            # render a single heading with full signature (name + parameters)
+            show_root_heading: true
+            show_root_toc_entry: false
+            heading_level: 2
+            show_symbol_type_heading: false
+            show_signature: true
+            show_signature_annotations: true
+            separate_signature: false
+
             # use Google docstrings style
             docstring_style: google
 

@@ -3,33 +3,41 @@ title: Home
 ---
 # ArcPy Parquet 0.2.0.dev0 Documentation
 
-ArcPy Parquet is provides the ability to convert data between local ArcGIS Pro Feature Classes and Parquet datasets,
-including Geoparquet. While ArcGIS Pro does include the ability to work with Parquet data natively, it can only work 
-with single file parquet files. Since Parquet data frequently is partitioned and sharded, this project enables working 
-with partitioned and sharded Parquet datasets. It also is designed to handle extremely large datasets.
+ArcPy Parquet provides conversion between ArcGIS Pro feature classes and Parquet datasets,
+with GeoParquet as the default spatial data standard. While ArcGIS Pro can read Parquet
+directly, built-in support is limited for many partitioned and sharded layouts. ArcPy
+Parquet is designed for large, distributed-style Parquet datasets and practical ArcGIS
+workflows.
 
 ArcPy Parquet is comprised of an installable Python package located in `./src` along with an ArcGIS Python Toolbox, 
 which can be used in ArcGIS Pro.
+
+## Start Here
+
+Most users are looking for the ArcGIS Pro toolbox workflow:
+
+1. **ArcGIS Pro users**: start with [ArcGIS Pro Toolbox](toolbox.md).
+2. **Python developers**: go to [ArcPy Parquet Python API](api.md).
 
 If you download the entire ArcPy Parquet repository to your local machine, and keep all the downloaded assets 
 together in the same location, you do not need to customize your Python configuration at all. The toolbox knows 
 how to find the Python package relative to itself, and will include all functionality.
 
-## Recommended API Surface
+## API Surface
 
-For new integrations, use:
+Use the following public functions:
 
-- `features_to_geoparquet`
-- `geoparquet_to_features`
-- `get_geometry_columns`
+See the full API reference: [ArcPy Parquet Python API](api.md).
 
-These functions are intended to be the stable GeoParquet-focused interface.
+- [`features_to_parquet`](api.md#arcpy_parquet.features_to_parquet)
+- [`parquet_to_features`](api.md#arcpy_parquet.parquet_to_features)
+- [`create_schema_file`](api.md#arcpy_parquet.create_schema_file)
 
-## Legacy API Migration
+These functions define the package conversion interface.
 
-Legacy entry points remain available during transition and emit deprecation warnings:
+## Geometry Export Notes
 
-- `feature_class_to_parquet` -> `features_to_geoparquet`
-- `parquet_to_feature_class` -> `geoparquet_to_features`
-
-Update callers to the new names to align with ongoing conversion behavior and documentation.
+- `GEOPARQUET` is the default export geometry format.
+- `WKB` is not a supported top-level export format value.
+- `XY` exports coordinates to columns `x_lon` and `y_lat`.
+- `H3` exports H3 indices using h3-py helper-driven geometry conversion.
