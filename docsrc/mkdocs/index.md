@@ -1,7 +1,7 @@
 ---
 title: Home
 ---
-# ArcPy Parquet 0.3.0.dev0 Documentation
+# ArcPy Parquet 0.3.0 Documentation
 
 ArcPy Parquet provides conversion between ArcGIS Pro feature classes and Parquet datasets,
 with GeoParquet as the default spatial data standard. While ArcGIS Pro can read Parquet
