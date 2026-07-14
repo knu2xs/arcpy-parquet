@@ -1,7 +1,11 @@
 ---
-title: API
+title: ArcPy Parquet Python API
 ---
 
-All of the data conversion functionality for ArcPy Parquet is in a Python package, `arcpy_parquet`. In this package, there are two primary functions for import and export.
+All conversion functionality for ArcPy Parquet is in the `arcpy_parquet` package.
 
-::: arcpy_parquet
+::: arcpy_parquet.features_to_parquet
+
+::: arcpy_parquet.parquet_to_features
+
+::: arcpy_parquet.create_schema_file

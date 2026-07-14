@@ -1,4 +1,4 @@
-# arcpy-parquet
+# ArcPy Parquet
 
 Conversion utilties for Parquet data using ArcPy.
 
@@ -9,46 +9,44 @@ Conversion utilties for Parquet data using ArcPy.
 2 - Create an environment with the requirements.
     
 ```
-        > make env
+make env
 ```
 
 3 - Explore - If you are more into Python, a good place to start is `jupyter lab` from the root of the project, and 
   look in the `./notebooks` directory. If GIS is more your schtick, open the project 
   `./arcgis/arcpy-parquet.aprx`.
 
-## GeoParquet API (Recommended)
+## Conversion API (Recommended)
 
 The primary API surface for new work is:
 
-- `features_to_geoparquet`
-- `geoparquet_to_features`
-- `get_geometry_columns`
+- `features_to_parquet`
+- `parquet_to_features`
+- `create_schema_file`
 
 ```python
-from arcpy_parquet import features_to_geoparquet, geoparquet_to_features
+from arcpy_parquet import features_to_parquet, parquet_to_features
 
-dataset_dir = features_to_geoparquet(
-  feature_class=r"data/sample/sample.gdb/sample_layer",
-  output_path=r"data/interim/roundtrip_dataset",
+dataset_dir = features_to_parquet(
+  input_features=r"data/sample/sample.gdb/sample_layer",
+  output_parquet=r"data/interim/roundtrip_dataset",
+  geometry_format="GEOPARQUET",
   batch_size=10000,
-  overwrite=True,
 )
 
-geoparquet_to_features(
+parquet_to_features(
   parquet_path=dataset_dir,
-  feature_class=r"data/interim/interim.gdb/roundtrip_layer",
-  overwrite=True,
+  output_feature_class=r"data/interim/interim.gdb/roundtrip_layer",
+  geometry_format="GEOPARQUET",
 )
 ```
 
-## Migration Guide
+### Geometry Format Notes
 
-Legacy function names continue to work during the migration window, but they now emit deprecation warnings:
-
-- `feature_class_to_parquet` -> `features_to_geoparquet`
-- `parquet_to_feature_class` -> `geoparquet_to_features`
-
-Migrate to the new names for GeoParquet 1.1 metadata behavior and forward compatibility.
+- `GEOPARQUET` is the default geometry format for export and writes GeoParquet metadata.
+- `WKB` is not a supported top-level `geometry_format` value.
+- `XY` writes two columns named `x_lon` and `y_lat`.
+- `H3` writes H3 indices: a single index string for points, and JSON-encoded intersecting indices for lines/polygons.
 
 ## Using Make - common commands
 
@@ -91,3 +89,4 @@ If you want to...
 GeoAI project template</a>. This template, in turn, is simply an extension and light modification of the 
 <a target="_blank" href="https://drivendata.github.io/cookiecutter-data-science/">cookiecutter data science project 
 template</a>. #cookiecutterdatascience</small></p>
+

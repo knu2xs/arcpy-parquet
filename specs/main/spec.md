@@ -64,7 +64,7 @@ As a maintainer, I need clear docs, tests, and validation steps for migration so
 ### Functional Requirements
 
 - **FR-001**: System MUST expose `features_to_geoparquet`, `geoparquet_to_features`, and `get_geometry_columns` from the main `arcpy_parquet` package.
-- **FR-002**: System MUST support WKB geometry encoding with GeoParquet 1.1 metadata for export.
+- **FR-002**: System MUST support `GEOPARQUET` geometry format for export (WKB internally) with GeoParquet 1.1 metadata.
 - **FR-003**: System MUST support import from GeoParquet dataset/file to feature class with explicit geometry-column selection.
 - **FR-004**: System MUST preserve backward compatibility for legacy conversion entry points while providing deprecation warnings.
 - **FR-005**: System MUST support optional Hive-style partitioned export and configurable batch size.

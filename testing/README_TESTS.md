@@ -2,7 +2,7 @@
 
 ## Overview
 
-This test suite provides comprehensive testing for the `parquet_to_feature_class` function, covering all supported geometry formats, error handling, and edge cases.
+This test suite provides comprehensive testing for the `parquet_to_features` function, covering all supported geometry formats, error handling, and edge cases.
 
 ## Test Organization
 
@@ -69,32 +69,32 @@ This test suite provides comprehensive testing for the `parquet_to_feature_class
 
 ### Run all tests
 ```bash
-pytest testing/test_parquet_to_feature_class.py -v
+pytest testing/test_parquet_to_features.py -v
 ```
 
 ### Run specific test category
 ```bash
 # GeoParquet tests only
-pytest testing/test_parquet_to_feature_class.py -v -k "geoparquet"
+pytest testing/test_parquet_to_features.py -v -k "geoparquet"
 
 # COORDINATES tests only
-pytest testing/test_parquet_to_feature_class.py -v -k "coordinates"
+pytest testing/test_parquet_to_features.py -v -k "coordinates"
 
 # H3 tests only
-pytest testing/test_parquet_to_feature_class.py -v -k "h3"
+pytest testing/test_parquet_to_features.py -v -k "h3"
 
 # Error handling tests only
-pytest testing/test_parquet_to_feature_class.py -v -k "error or missing or invalid"
+pytest testing/test_parquet_to_features.py -v -k "error or missing or invalid"
 ```
 
 ### Run specific test
 ```bash
-pytest testing/test_parquet_to_feature_class.py::test_geoparquet_point -v
+pytest testing/test_parquet_to_features.py::test_geoparquet_point -v
 ```
 
 ### Show test coverage
 ```bash
-pytest testing/test_parquet_to_feature_class.py --cov=arcpy_parquet --cov-report=html
+pytest testing/test_parquet_to_features.py --cov=arcpy_parquet --cov-report=html
 ```
 
 ## Test Data
@@ -139,7 +139,7 @@ Defined in `conftest.py`:
 ## Known Limitations
 
 1. Complex data types (arrays, structs) are converted to strings
-2. Only WKB-encoded geometries supported for GeoParquet
+2. GeoParquet uses WKB internally, but export selection should use `geometry_format="GEOPARQUET"` (not `WKB`)
 3. H3 format requires the `h3` package to be installed
 
 ## Troubleshooting
@@ -158,3 +158,4 @@ When adding new tests:
 3. Add skipif decorators for optional dependencies
 4. Document expected behavior in docstring
 5. Use helper functions for validation
+

@@ -10,8 +10,8 @@ non-technical users with any custom libraries you are utilizing.
 
 Tool execution is aligned with the GeoParquet API surface in `arcpy_parquet`:
 
-- `FeatureClassToParquet` maps to `features_to_geoparquet`
-- `GeoparquetToFeatureClass` maps to `geoparquet_to_features`
+- `FeatureClassToParquet` maps to `features_to_parquet`
+- `GeoparquetToFeatureClass` maps to `parquet_to_features`
 
 Expected parameter coverage for current and upcoming toolbox updates:
 

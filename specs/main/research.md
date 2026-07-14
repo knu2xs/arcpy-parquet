@@ -20,7 +20,7 @@
 
 ## Decision 4: Enforce GeoParquet 1.1 Metadata Contract
 
-- Decision: Treat WKB geometry encoding and required GeoParquet metadata keys as non-negotiable output guarantees.
+- Decision: Treat GeoParquet output (with internal WKB geometry encoding) and required GeoParquet metadata keys as non-negotiable guarantees.
 - Rationale: Interoperability and downstream correctness depend on metadata compliance.
 - Alternatives considered: Best-effort metadata without strict contract checks. Rejected because it risks invalid outputs.
 

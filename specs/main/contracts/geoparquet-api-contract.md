@@ -18,7 +18,7 @@ This contract defines external behavior for:
   - `fields`, `partition_fields`, `where_clause`, `spatial_reference`, `overwrite`, `batch_size`, `include_centroids`, `name`
 - Required behavior:
   - Writes Parquet output with GeoParquet 1.1-compliant metadata.
-  - Encodes geometry using WKB.
+  - Encodes geometry via `GEOPARQUET` output (WKB internally per GeoParquet).
   - Supports optional partitioned output when partition fields are provided.
 - Error behavior:
   - Raises clear exceptions for invalid source path, invalid partition fields, and non-overwritable output conflicts.

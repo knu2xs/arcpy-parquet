@@ -18,10 +18,13 @@ if importlib.util.find_spec("arcpy_parquet") is None:
     else:
         sys.path.insert(0, str(dir_src))
 
-from arcpy_parquet import create_schema_file
-from arcpy_parquet.geoparquet import features_to_geoparquet, geoparquet_to_features
-from arcpy_parquet.utils.pyt_utils import deactivate_parameter
-from arcpy_parquet.utils.pyarrow_utils import get_partition_strings
+from arcpy_parquet import create_schema_file, features_to_parquet, parquet_to_features
+from arcpy_parquet.utils._pyt import deactivate_parameter
+from arcpy_parquet.utils._pyarrow import get_partition_strings
+
+
+# add flag to detect if h3 available
+has_h3 = False if importlib.util.find_spec("h3") is None else True
 
 
 class Toolbox(object):
@@ -31,7 +34,7 @@ class Toolbox(object):
         self.alias = "arcpyParquetTools"
 
         # List of tool classes associated with this toolbox
-        self.tools = [CreateSchemaFile, GeoparquetToFeatureClass, FeatureClassToParquet]
+        self.tools = [GeoparquetToFeatureClass, FeatureClassToParquet, CreateSchemaFile]
 
 
 class FeatureClassToParquet(object):
@@ -79,8 +82,11 @@ class FeatureClassToParquet(object):
             parameterType="Required",
         )
         geometry_format.filter.type = "ValueList"
-        geometry_format.filter.list = ["WKB"]
-        geometry_format.value = "WKB"
+        export_formats = ["GEOPARQUET", "XY", "GEOJSON"]
+        if has_h3:
+            export_formats.append("H3")
+        geometry_format.filter.list = export_formats
+        geometry_format.value = "GEOPARQUET"
 
         param_lst = [input_table, output_parquet, partitioning_columns, geometry_format]
 
@@ -113,10 +119,11 @@ class FeatureClassToParquet(object):
         # get the literal value for the output format
         geometry_format = parameters[3].valueAsText
 
-        features_to_geoparquet(
-            feature_class=in_tbl_pth,
-            output_path=out_pqt_pth,
-            partition_fields=partition_cols,
+        features_to_parquet(
+            input_features=in_tbl_pth,
+            output_parquet=out_pqt_pth,
+            partition_columns=partition_cols,
+            geometry_format=geometry_format,
             batch_size=300000,
         )
 
@@ -148,8 +155,11 @@ class GeoparquetToFeatureClass(object):
             parameterType="Required",
         )
         geom_type.filter.type = "ValueList"
-        geom_type.filter.list = ["GEOPARQUET"]
-        geom_type.value = "GEOPARQUET"
+        fltr_lst = ["GEOPARQUET", "COORDINATES"]
+        if has_h3:
+            fltr_lst.append("H3")
+        geom_type.filter.list = fltr_lst
+        geom_type.value = "COORDINATES"
 
         x_col = arcpy.Parameter(
             name="x_col",
@@ -461,6 +471,9 @@ class GeoparquetToFeatureClass(object):
         # unpack the parameters
         pqt_pth = parameters[0].valueAsText
         geom_type = parameters[1].valueAsText
+        x_col = parameters[2].valueAsText
+        y_col = parameters[3].valueAsText
+        h3_col = parameters[4].valueAsText
         sptl_ref = parameters[5].value
         out_fc_pth = parameters[6].valueAsText
         partition = parameters[7].valueAsText
@@ -469,35 +482,26 @@ class GeoparquetToFeatureClass(object):
         smpl_cnt = parameters[10].valueAsText
         schema_file_pth = parameters[11].valueAsText
 
-        if geom_type != "GEOPARQUET":
-            raise ValueError('Only "GEOPARQUET" is supported by this tool.')
+        if geom_type == "COORDINATES":
+            geometry_column = [x_col, y_col]
+        elif geom_type == "H3":
+            geometry_column = h3_col
+        else:
+            geometry_column = None
 
-        if partition:
-            arcpy.AddWarning(
-                "Partition filtering is not supported by geoparquet_to_features and will be ignored."
-            )
-        if build_idx is False:
-            arcpy.AddWarning(
-                "Build Spatial Index option is not exposed by geoparquet_to_features and will be ignored."
-            )
-        if smpl:
-            arcpy.AddWarning(
-                "Sample import options are not supported by geoparquet_to_features and will be ignored."
-            )
-        if smpl_cnt:
-            arcpy.AddWarning(
-                "Sample count is not supported by geoparquet_to_features and will be ignored."
-            )
-        if schema_file_pth:
-            arcpy.AddWarning(
-                "Schema file input is not used by geoparquet_to_features and will be ignored."
-            )
+        sample_count = int(smpl_cnt) if smpl else None
+        schema_path = Path(schema_file_pth) if schema_file_pth else None
 
-        geoparquet_to_features(
+        parquet_to_features(
             parquet_path=pqt_pth,
-            feature_class=out_fc_pth,
+            output_feature_class=out_fc_pth,
+            schema_file=schema_path,
             spatial_reference=sptl_ref,
-            overwrite=arcpy.env.overwriteOutput,
+            geometry_format=geom_type,
+            parquet_partitions=partition,
+            geometry_column=geometry_column,
+            sample_count=sample_count,
+            build_spatial_index=build_idx,
         )
 
         return
@@ -506,60 +510,43 @@ class GeoparquetToFeatureClass(object):
 class CreateSchemaFile(object):
     def __init__(self):
         self.label = "Create Schema File"
-        self.description = "Create a CSV schema file from an existing Feature Class or Parquet dataset to use with imports."
+        self.description = "Create a CSV schema file from an existing dataset for parquet imports."
         self.category = "Utilities"
 
     def getParameterInfo(self):
-
-        template_dataset = arcpy.Parameter(
-            name="template_dataset",
-            displayName="Template Dataset Path",
-            datatype=["DEFeatureClass", "DEFolder", "DEFile"],
+        input_dataset = arcpy.Parameter(
+            name="input_dataset",
+            displayName="Input Dataset",
+            datatype="DETable",
             direction="Input",
             parameterType="Required",
         )
-
-        # Apply filter for parquet files
-        # template_dataset.filter.list = ["*.parquet"]
 
         schema_file_pth = arcpy.Parameter(
             name="schema_file_pth",
             displayName="Schema File",
             datatype="DEFile",
             direction="Output",
-            parameterType="Optional",
+            parameterType="Required",
         )
 
-        param_lst = [template_dataset, schema_file_pth]
-
-        return param_lst
+        return [input_dataset, schema_file_pth]
 
     def isLicensed(self):
         return True
 
     def updateParameters(self, parameters):
-        """Modify the values and properties of parameters before internal
-        validation is performed.  This method is called whenever a parameter
-        has been changed."""
-
         return
 
     def updateMessages(self, parameters):
-        """Modify the messages created by internal validation for each tool
-        parameter.  This method is called after internal validation."""
         return
 
     def execute(self, parameters, messages):
-        """The source code of the tool."""
+        input_dataset = parameters[0].valueAsText
+        schema_file_pth = parameters[1].valueAsText
 
-        # unpack the parameters
-        template_dataset = Path(parameters[0].valueAsText)
-        schema_file_pth = Path(parameters[1].valueAsText)
-
-        # execute the function
         create_schema_file(
-            input_dataset=template_dataset, output_schema_file=schema_file_pth
+            input_dataset=Path(input_dataset),
+            output_schema_file=Path(schema_file_pth),
         )
-
-        return
     

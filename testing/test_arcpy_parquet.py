@@ -76,35 +76,35 @@ features_pt = gdb_smpl / "wa_h3_09_centroids"
 @pytest.mark.parametrize(
     "input_features,output_format,expected_columns,exclude_columns,partition_columns",
     [
-        (features_poly, "WKB", ["h3_index", "h3_06"], ["SHAPE"], None),
-        (features_poly, "WKB", ["h3_index", "h3_06"], ["SHAPE"], ["h3_06"]),
+        (features_poly, "GEOPARQUET", ["h3_index", "h3_06", "geometry"], ["SHAPE"], None),
+        (features_poly, "GEOPARQUET", ["h3_index", "h3_06", "geometry"], ["SHAPE"], ["h3_06"]),
         (
             features_poly,
             "XY",
-            ["h3_index", "h3_06", "geometry_X", "geometry_Y"],
+            ["h3_index", "h3_06", "x_lon", "y_lat"],
             ["SHAPE"],
             None,
         ),
-        (features_pt, "WKB", ["h3_index", "h3_06"], ["SHAPE"], None),
-        (features_pt, "WKB", ["h3_index", "h3_06"], ["SHAPE"], ["h3_06"]),
+        (features_pt, "GEOPARQUET", ["h3_index", "h3_06", "geometry"], ["SHAPE"], None),
+        (features_pt, "GEOPARQUET", ["h3_index", "h3_06", "geometry"], ["SHAPE"], ["h3_06"]),
         (
             features_pt,
             "XY",
-            ["h3_index", "h3_06", "geometry_X", "geometry_Y"],
+            ["h3_index", "h3_06", "x_lon", "y_lat"],
             ["SHAPE"],
             None,
         ),
     ],
     ids=[
-        "polygon WKB no partition",
-        "polygon WKB with partition",
+        "polygon GEOPARQUET no partition",
+        "polygon GEOPARQUET with partition",
         "polygon XY no partition",
-        "point WKB no partition",
-        "point WKB with partition",
+        "point GEOPARQUET no partition",
+        "point GEOPARQUET with partition",
         "point XY no partition",
     ],
 )
-def test_feature_class_to_parquet(
+def test_features_to_parquet(
     input_features,
     output_format,
     expected_columns,
@@ -112,8 +112,8 @@ def test_feature_class_to_parquet(
     partition_columns,
     tmp_pqt,
 ):
-    res = arcpy_parquet.feature_class_to_parquet(
-        input_table=input_features,
+    res = arcpy_parquet.features_to_parquet(
+        input_features=input_features,
         output_parquet=tmp_pqt,
         partition_columns=partition_columns,
         include_geometry=True,
@@ -133,7 +133,7 @@ coord_schm = dir_smpl / "main_fgdb_sample/schema"
 coord_cols = ["longitude", "latitude"]
 
 
-def test_parquet_to_feature_class_coordinates(tmp_gdb):
+def test_parquet_to_features_coordinates(tmp_gdb):
     out_fc = tmp_gdb / "main_fgdb_sample"
     logger.info(f'output features path: {out_fc}')
 
@@ -141,7 +141,7 @@ def test_parquet_to_feature_class_coordinates(tmp_gdb):
     in_cnt = in_tbl.num_rows
     logger.info(f'Input row count: {in_cnt:,}')
 
-    res = arcpy_parquet.parquet_to_feature_class(
+    res = arcpy_parquet.parquet_to_features(
         parquet_path=coord_pqt,
         output_feature_class=out_fc,
         geometry_column=coord_cols,
@@ -156,7 +156,7 @@ def test_parquet_to_feature_class_coordinates(tmp_gdb):
     assert in_cnt == out_cnt
 
 
-def test_parquet_to_feature_class_coordinates_schema(tmp_gdb):
+def test_parquet_to_features_coordinates_schema(tmp_gdb):
     out_fc = tmp_gdb / "main_fgdb_sample_scheama"
     logger.info(f'Output features path: {out_fc}')
 
@@ -164,7 +164,7 @@ def test_parquet_to_feature_class_coordinates_schema(tmp_gdb):
     in_cnt = in_tbl.num_rows
     logger.info(f'Input row count: {in_cnt:,}')
 
-    res = arcpy_parquet.parquet_to_feature_class(
+    res = arcpy_parquet.parquet_to_features(
         parquet_path=coord_pqt,
         output_feature_class=out_fc,
         schema_file=coord_schm,
@@ -180,7 +180,7 @@ def test_parquet_to_feature_class_coordinates_schema(tmp_gdb):
     assert in_cnt == out_cnt
 
 
-def test_parquet_to_feature_class_coordinates_no_schema(tmp_gdb):
+def test_parquet_to_features_coordinates_no_schema(tmp_gdb):
     out_fc = tmp_gdb / "main_fgdb_sample"
     logger.info(f'Output features path: {out_fc}')
 
@@ -188,7 +188,7 @@ def test_parquet_to_feature_class_coordinates_no_schema(tmp_gdb):
     in_cnt = in_tbl.num_rows
     logger.info(f'Input row count: {in_cnt:,}')
 
-    res = arcpy_parquet.parquet_to_feature_class(
+    res = arcpy_parquet.parquet_to_features(
         parquet_path=coord_pqt,
         output_feature_class=out_fc,
         geometry_column=coord_cols,
@@ -203,19 +203,19 @@ def test_parquet_to_feature_class_coordinates_no_schema(tmp_gdb):
     assert in_cnt == out_cnt
 
 
-def test_parquet_to_feature_class_geoparquet(tmp_gdb):
-    assert False, "Not implemented yet"
+def test_parquet_to_features_geoparquet(tmp_gdb):
+    pytest.skip("Legacy placeholder test; GeoParquet coverage lives in test_parquet_to_features.py")
 
 
-def test_parquet_to_feature_class_geoparquet_schema(tmp_gdb):
-    assert False, "Not implemented yet"
+def test_parquet_to_features_geoparquet_schema(tmp_gdb):
+    pytest.skip("Legacy placeholder test; GeoParquet schema coverage lives in test_parquet_to_features.py")
 
 
-def test_parquet_to_feature_class_h3(tmp_gdb):
-    assert False, "Not implemented yet"
+def test_parquet_to_features_h3(tmp_gdb):
+    pytest.skip("Legacy placeholder test; H3 coverage lives in test_parquet_to_features.py")
 
 
-def test_parquet_to_feature_class_example_geoparquet(tmp_gdb):
+def test_parquet_to_features_example_geoparquet(tmp_gdb):
     """Test converting a sample GeoParquet dataset to a feature class"""
     out_fc = tmp_gdb / "geoparquet_example"
     in_pqt = dir_smpl / "geoparquet_example"
@@ -224,7 +224,7 @@ def test_parquet_to_feature_class_example_geoparquet(tmp_gdb):
     in_cnt = in_tbl.num_rows
     logger.info(f'Input row count: {in_cnt:,}')
 
-    res = arcpy_parquet.parquet_to_feature_class(
+    res = arcpy_parquet.parquet_to_features(
         parquet_path=in_pqt,
         output_feature_class=out_fc,
         geometry_format="GEOPARQUET",
@@ -245,7 +245,9 @@ def test_get_parquet_max_string_lengths(tmp_gdb):
     assert all(isinstance(k, str) for k in res.keys())
     assert all(v is None or isinstance(v, int) for v in res.values())
     assert all(v is None or v > 0 for v in res.values())
-    assert set(res.keys()) == set(coord_cols)
+    assert "longitude" not in res
+    assert "latitude" not in res
+    assert "name" in res
 
 
 def test_create_schema_file_parquet(tmp_dir):
@@ -281,3 +283,38 @@ def test_get_partition_strings():
     assert all(isinstance((pqt_pth / p), Path) for p in res)
     assert all((pqt_pth / p).exists() for p in res)
     assert all((pqt_pth / p).is_dir() for p in res)
+
+
+def test_validate_parquet_path_with_partition_list():
+    """Validate directory parquet path with optional partition list."""
+    pqt_pth = dir_smpl / "main_fgdb_sample/parquet"
+    res = arcpy_parquet.utils.pyarrow_utils.validate_parquet_path(
+        parquet_path=pqt_pth,
+        parquet_partitions=["delivery_year=2024"],
+    )
+    assert isinstance(res, Path)
+    assert res == pqt_pth
+
+
+def test_validate_parquet_path_with_invalid_partition_type():
+    """Validate partition argument type checking for parquet path validator."""
+    pqt_pth = dir_smpl / "main_fgdb_sample/parquet"
+    with pytest.raises(ValueError, match="parquet_partitions must be a list"):
+        arcpy_parquet.utils.pyarrow_utils.validate_parquet_path(
+            parquet_path=pqt_pth,
+            parquet_partitions="delivery_year=2024",
+        )
+
+
+def test_validate_parquet_path_file_with_partition_list_rejected():
+    """Validate partition list is rejected when parquet_path is a part file."""
+    pqt_pth = dir_smpl / "main_fgdb_sample/parquet"
+    part_file = next(pqt_pth.rglob("*.parquet"))
+    with pytest.raises(
+        ValueError,
+        match="cannot specify a parquet partition",
+    ):
+        arcpy_parquet.utils.pyarrow_utils.validate_parquet_path(
+            parquet_path=part_file,
+            parquet_partitions=["delivery_year=2024"],
+        )

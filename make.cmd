@@ -43,12 +43,12 @@ GOTO %1
 
 :: Make documentation using MkDocs!
 :docs
-    CALL conda run -p %CONDA_DIR% mkdocs build -f ./docsrc/mkdocs.yml
+    CALL conda run --no-capture-output -p %CONDA_DIR% mkdocs build -f ./docsrc/mkdocs.yml
     GOTO end
 
 :: MkDocs live documentation server
 :docserve
-    CALL conda run -p %CONDA_DIR% mkdocs serve -f ./docsrc/mkdocs.yml
+    CALL conda run --no-capture-output -p %CONDA_DIR% mkdocs serve -f ./docsrc/mkdocs.yml
     GOTO end
 
 :: Build the local environment from the environment file
@@ -64,36 +64,36 @@ GOTO %1
     CALL conda env update -p %CONDA_DIR% -f environment.yml
 
     :: Install the local package in development (experimental) mode
-    CALL conda run -p %CONDA_DIR% python -m pip install -e .
+    CALL conda run --no-capture-output -p %CONDA_DIR% python -m pip install -e .
 
     GOTO end
 
 :: Start Jupyter Label
 :jupyter
-    CALL conda run -p %CONDA_DIR% python -m jupyterlab --ip=0.0.0.0 --allow-root --NotebookApp.token=""
+    CALL conda run --no-capture-output -p %CONDA_DIR% python -m jupyterlab --ip=0.0.0.0 --allow-root --NotebookApp.token=""
     GOTO end
 
 :: Make *.pyt zipped archive with requirements
 :pytzip
-    CALL conda run -p %CONDA_DIR% python -m scripts/make_pyt_archive.py
+    CALL conda run --no-capture-output -p %CONDA_DIR% python -m scripts/make_pyt_archive.py
     GOTO end
 
 :: Make the package for uploading
 :wheel
 
     :: Build the pip package
-    CALL conda run -p %CONDA_DIR% python -m build --wheel
+    CALL conda run --no-capture-output -p %CONDA_DIR% python -m build --wheel
 
     GOTO end
 
 :: Run all tests in module
 :test
-	CALL conda run -p %CONDA_DIR% pytest "%~dp0testing"
+	CALL conda run --no-capture-output -p %CONDA_DIR% pytest "%~dp0testing"
 	GOTO end
 
 :: black formatting
 :black
-    CALL conda run -p %CONDA_dIR% black src/ --verbose
+    CALL conda run --no-capture-output -p %CONDA_DIR% black src/ --verbose
     GOTO end
 
 :lint
