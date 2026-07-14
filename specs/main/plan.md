@@ -1,51 +1,42 @@
 # Implementation Plan: Efficient GeoParquet Integration
 
-**Branch**: `main` | **Date**: 2026-03-08 | **Spec**: `specs/main/spec.md`
+**Branch**: `main` | **Date**: 2026-07-13 | **Spec**: `specs/main/spec.md`
 **Input**: Feature specification from `specs/main/spec.md`
 
 ## Summary
 
-Integrate the efficient GeoParquet conversion implementation into
-`arcpy_parquet` while preserving backward compatibility and ArcGIS toolbox
-workflows. The technical approach centers on batch-streamed Arrow RecordBatch
-processing, explicit public API exports, compatibility wrappers with deprecation
-guidance, and documentation/test updates aligned with GeoParquet 1.1 behavior.
+Integrate the efficient GeoParquet conversion implementation into the public `arcpy_parquet` package and ArcGIS Python toolbox while preserving legacy entry points through deprecation wrappers. The approach standardizes on streaming Arrow batch conversion, explicit GeoParquet metadata handling, toolbox parameter remapping, and test/documentation updates that preserve existing workflows.
 
 ## Technical Context
 
-**Language/Version**: Python 3.9+  
-**Primary Dependencies**: arcpy, pyarrow, pandas, numpy  
-**Storage**: File geodatabases (`.gdb`) and file/directory-based Parquet datasets  
-**Testing**: pytest (unit + integration in `testing/`)  
-**Target Platform**: ArcGIS Pro Python environment on Windows
+**Language/Version**: Python >=3.9 (project requires `>=3.9`; ArcGIS Pro-managed environment)  
+**Primary Dependencies**: `arcpy`, `pyarrow`, `pandas`, `numpy`, `arcgis`  
+**Storage**: File-based datasets (Parquet/GeoParquet files and directories, file geodatabases)  
+**Testing**: `pytest` in `testing/`  
+**Target Platform**: Windows ArcGIS Pro Python environment (Conda-managed)  
 **Project Type**: Python library + ArcGIS Python toolbox integration  
-**Performance Goals**: Reduce peak memory usage for large conversions through batch streaming and support large datasets via partitioned output  
-**Constraints**: Preserve legacy API compatibility during migration; keep GeoParquet 1.1 metadata correctness; avoid introducing new secret/configuration risks  
-**Scale/Scope**: Package exports, conversion module migration, toolbox parameter mapping, tests, and docs updates across repository-maintained workflows
+**Performance Goals**: Batch-streamed conversion that avoids full-table loads; practical parity or improvement versus legacy conversion on representative datasets  
+**Constraints**: Preserve backward compatibility with deprecation warnings; maintain GeoParquet 1.1 metadata correctness; avoid secrets in tracked files  
+**Scale/Scope**: Repository-scoped feature touching package API, toolbox parameter mapping, tests, and docs
 
 ## Constitution Check
 
 *GATE: Must pass before Phase 0 research. Re-check after Phase 1 design.*
 
-### Pre-Design Gate Review
+### Pre-Research Gate Check
 
-- [x] Code quality gate: Planned modules and touched files enforce PEP8,
-  explicit type hints, and Google-style docstrings.
-- [x] Testability gate: Plan includes automated test additions for conversion
-  behavior, schema/metadata handling, and compatibility behavior.
-- [x] ArcPy performance gate: Design preserves batch/streaming behavior and
-  prefers efficient cursor/memory-safe geoprocessing patterns.
-- [x] Reproducibility gate: Plan explicitly includes updates for docs/scripts and
-  repo workflows (`make test`, docs paths, toolbox integration).
-- [x] Security gate: No secrets required; config and sensitive values remain in
-  `config/secrets.ini` or external environment channels.
+- [x] Code quality gate: Planned code changes satisfy PEP8, type hints, and Google-style docstring requirements.
+- [x] Testability gate: Plan defines automated test updates in `testing/` for any behavior, schema, or conversion-path changes.
+- [x] ArcPy performance gate: ArcPy update workflows use `arcpy.da.UpdateCursor` where update cursors are required; no deviation expected for this conversion-centric feature.
+- [x] Reproducibility gate: Workflow/tooling impacts include coordinated updates to make/script/docs paths when behavior changes.
+- [x] Security gate: No secret values are introduced in tracked source files; config handling remains in `config/secrets.ini` or secure environment channels.
 
-### Post-Design Gate Review
+### Post-Design Re-check
 
-- [x] Phase 0 research resolved all uncertainties without unresolved
-  clarifications.
-- [x] Phase 1 artifacts (`data-model.md`, `contracts/`, `quickstart.md`) include
-  testable interface and validation flow details aligned to constitution.
+- [x] Design artifacts include explicit quality, testing, and compatibility coverage.
+- [x] Data model and contracts define conversion-path behavior and error conditions.
+- [x] Quickstart includes reproducible validation steps aligned with existing project workflows.
+- [x] No constitution violations require complexity exceptions.
 
 ## Project Structure
 
@@ -53,43 +44,55 @@ guidance, and documentation/test updates aligned with GeoParquet 1.1 behavior.
 
 ```text
 specs/main/
-├── plan.md
-├── spec.md
-├── research.md
-├── data-model.md
-├── quickstart.md
-├── contracts/
-│   └── geoparquet-api-contract.md
-└── tasks.md
++-- plan.md
++-- research.md
++-- data-model.md
++-- quickstart.md
++-- contracts/
+|   +-- geoparquet-api-contract.md
++-- tasks.md
 ```
 
 ### Source Code (repository root)
 
 ```text
 src/
-├── arcpy_parquet/
-│   ├── __init__.py
-│   ├── __main__.py
-│   ├── geoparquet.py
-│   └── utils/
-│       ├── __init__.py
-│       ├── logging_utils.py
-│       └── main.py
-└── parquet/
-    └── _parquet.py
++-- arcpy_parquet/
 
 arcgis/
-└── ArcPy-Parquet-Tools.pyt
++-- ArcPy-Parquet-Tools.pyt
 
 testing/
-├── test_arcpy_parquet.py
-├── test_parquet_to_feature_class.py
-└── test_geoparquet_validity.py
++-- test_arcpy_parquet.py
++-- test_parquet_to_feature_class.py
++-- test_geoparquet_validity.py
+
+scripts/
++-- make_pyt_archive.py
+
+docsrc/
++-- mkdocs.yml
+
+docs/
++-- README.md
+
+arcgis/
++-- README.md
 ```
 
-**Structure Decision**: Use existing single-project Python package layout with
-ArcGIS toolbox integration and repository-local testing/documentation paths.
+**Structure Decision**: Use the existing single-package repository layout, adding/adjusting behavior in `src/arcpy_parquet/` and `arcgis/ArcPy-Parquet-Tools.pyt`, with verification in `testing/` and migration guidance in docs.
+
+## Phase 0: Research Output
+
+Research completed in `specs/main/research.md` with all technical context resolved and no open clarifications.
+
+## Phase 1: Design Output
+
+Design completed with:
+- `specs/main/data-model.md`
+- `specs/main/contracts/geoparquet-api-contract.md`
+- `specs/main/quickstart.md`
 
 ## Complexity Tracking
 
-No constitution violations identified; no complexity exemptions required.
+No constitution violations identified; no exceptions required.

@@ -54,10 +54,10 @@ As a maintainer, I need clear docs, tests, and validation steps for migration so
 
 ### Edge Cases
 
-- What happens when input contains multiple geometry columns and the selected geometry column is invalid?
-- How does the system handle existing output paths when overwrite is disabled?
-- How are empty/invalid partition values represented in Hive-style partitioned output?
-- How does import behave when GeoParquet CRS metadata is missing or malformed?
+- If input contains multiple geometry columns and the selected geometry column is invalid, the system MUST reject execution and return a validation error listing valid geometry columns.
+- If output already exists and overwrite is disabled, the system MUST abort without partial writes and return a clear conflict message.
+- If partition fields contain empty or invalid values, the system MUST apply deterministic fallback partition values and record the mapping in logs.
+- If GeoParquet CRS metadata is missing or malformed, the system MUST default to WGS84 when no spatial reference is provided and emit a warning.
 
 ## Requirements *(mandatory)*
 

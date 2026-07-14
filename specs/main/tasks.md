@@ -1,466 +1,185 @@
-# Integration Tasks: Efficient Parquet Conversion
+# Tasks: Efficient GeoParquet Integration
 
-## Project Overview
+**Input**: Design documents from `specs/main/`
+**Prerequisites**: `plan.md`, `spec.md`, `research.md`, `data-model.md`, `contracts/geoparquet-api-contract.md`, `quickstart.md`
 
-Integrate the efficient conversion implementation from `src/parquet/_parquet.py` into the main `arcpy_parquet` package. The new implementation provides:
-- Memory-efficient streaming with PyArrow RecordBatches
-- Full GeoParquet 1.1 specification compliance
-- WKB geometry encoding (no shapely/geopandas dependency)
-- Hive-style partitioning support
-- Better performance and lower memory footprint
+**Tests**: This feature changes conversion behavior and schema/metadata handling. Automated tests are required and included per story.
 
----
+## Phase 1: Setup (Shared Infrastructure)
 
-## Task 1: Create Missing Utility Functions
+**Purpose**: Prepare module layout and baseline quality updates needed by all stories.
 
-**Priority**: High  
-**Estimated Effort**: 30 minutes  
-**Dependencies**: None
-
-### Description
-Add the `slugify()` function to `src/arcpy_parquet/utils/main.py` to sanitize strings for filesystem-safe filenames. This function is currently imported in `_parquet.py` but doesn't exist in the target package.
-
-### Implementation Details
-- Function should convert strings to lowercase
-- Replace spaces with hyphens or underscores
-- Remove or replace special characters that are invalid in filenames
-- Handle Unicode characters appropriately
-- Return a safe filename string
-
-### Acceptance Criteria
-- [ ] `slugify()` function added to `src/arcpy_parquet/utils/main.py`
-- [ ] Function handles edge cases (empty strings, Unicode, special chars)
-- [ ] Function is exported in `src/arcpy_parquet/utils/__init__.py`
-- [ ] Basic unit tests added for the function
-
-### Example Implementation
-```python
-def slugify(text: str, separator: str = "_") -> str:
-    """Convert a string to a filesystem-safe slug.
-    
-    Args:
-        text: Input string to slugify.
-        separator: Character to use for separating words (default: "_").
-    
-    Returns:
-        A filesystem-safe string with special characters removed.
-    """
-    import re
-    # Convert to lowercase and replace spaces
-    text = text.lower().strip().replace(" ", separator)
-    # Remove invalid filename characters
-    text = re.sub(r'[<>:"/\\|?*]', '', text)
-    # Replace multiple separators with single separator
-    text = re.sub(f'{separator}+', separator, text)
-    # Remove leading/trailing separators
-    text = text.strip(separator)
-    return text
-```
+- [X] T001 Create module scaffold files `src/arcpy_parquet/geoparquet.py` and `src/arcpy_parquet/_compat.py`.
+- [X] T002 [P] Add utility support for filename-safe naming in `src/arcpy_parquet/utils/main.py` and export updates in `src/arcpy_parquet/utils/__init__.py`.
+- [X] T003 [P] Add test module scaffolds `testing/test_geoparquet_api.py`, `testing/test_geoparquet_roundtrip.py`, and `testing/test_compat_deprecations.py`.
+- [X] T004 [P] Document test fixture assumptions for new conversion tests in `testing/README_TESTS.md`.
 
 ---
 
-## Task 2: Adapt Imports in _parquet.py
+## Phase 2: Foundational (Blocking Prerequisites)
 
-**Priority**: High  
-**Estimated Effort**: 15 minutes  
-**Dependencies**: Task 1
+**Purpose**: Implement common behavior that all user stories depend on.
 
-### Description
-Update all import statements in `src/parquet/_parquet.py` to reference the correct modules in the `arcpy_parquet` package structure.
+**CRITICAL**: No user story work starts until this phase is complete.
 
-### Implementation Details
-Replace:
-```python
-from .utils._logging import get_logger
-from .utils._main_utils import slugify
-```
+- [X] T005 Implement shared conversion config and validation helpers in `src/arcpy_parquet/geoparquet.py`.
+- [X] T006 [P] Implement GeoParquet metadata extraction and geometry-column discovery helpers in `src/arcpy_parquet/geoparquet.py`.
+- [X] T007 [P] Implement shared error messages/exceptions for path validation, overwrite behavior, and geometry-column validation in `src/arcpy_parquet/geoparquet.py`.
+- [X] T008 Implement compatibility wrapper helpers and deprecation warning utilities in `src/arcpy_parquet/_compat.py`.
+- [X] T009 Wire package-level exports for new modules in `src/arcpy_parquet/__init__.py`.
+- [X] T010 Define baseline test fixtures/utilities reused across stories in `testing/conftest.py`.
 
-With:
-```python
-from arcpy_parquet.utils.logging_utils import get_logger
-from arcpy_parquet.utils.main import slugify
-```
-
-Also remove the example import line (line 10):
-```python
-from az_broadband.utils.parquet import features_to_geoparquet, geoparquet_to_features
-```
-
-### Acceptance Criteria
-- [ ] All import statements updated to reference `arcpy_parquet.utils`
-- [ ] Example imports from `az_broadband` package removed
-- [ ] No import errors when module is imported
-- [ ] Logger works correctly with updated imports
+**Checkpoint**: Foundation complete. User stories can now be delivered independently.
 
 ---
 
-## Task 3: Move _parquet.py to arcpy_parquet Package
+## Phase 3: User Story 1 - Integrate New GeoParquet API (Priority: P1) 🎯 MVP
 
-**Priority**: High  
-**Estimated Effort**: 10 minutes  
-**Dependencies**: Task 2
+**Goal**: Deliver stable public GeoParquet API for export/import with compliant metadata and geometry-column handling.
 
-### Description
-Move the updated `_parquet.py` file into the main `arcpy_parquet` package and rename it to better reflect its purpose.
+**Independent Test**: Execute `features_to_geoparquet` and `geoparquet_to_features` on representative sample data and verify metadata, geometry integrity, and successful roundtrip.
 
-### Implementation Details
-- Move: `src/parquet/_parquet.py` → `src/arcpy_parquet/geoparquet.py`
-- Delete the now-empty `src/parquet/` directory
-- The new filename `geoparquet.py` better indicates this is the GeoParquet 1.1 spec implementation
+### Tests for User Story 1
 
-### Acceptance Criteria
-- [ ] File moved to `src/arcpy_parquet/geoparquet.py`
-- [ ] `src/parquet/` directory removed
-- [ ] All imports in the moved file work correctly
-- [ ] Module can be imported: `from arcpy_parquet import geoparquet`
+- [ ] T011 [P] [US1] Add API contract tests for `features_to_geoparquet`, `geoparquet_to_features`, and `get_geometry_columns` in `testing/test_geoparquet_api.py`.
+- [ ] T012 [P] [US1] Add GeoParquet metadata validity assertions (version, primary column, geometry encoding, CRS) in `testing/test_geoparquet_validity.py`.
+- [ ] T013 [P] [US1] Add export/import roundtrip integration test coverage in `testing/test_geoparquet_roundtrip.py`.
+- [ ] T014 [P] [US1] Add partitioned export behavior tests for Hive-style layout and invalid/empty partition values in `testing/test_geoparquet_roundtrip.py`.
+- [ ] T015 [P] [US1] Add configurable batch-size behavior tests including boundary values and failure cases in `testing/test_geoparquet_api.py`.
 
-### Commands
-```powershell
-# Move the file
-Move-Item "src\parquet\_parquet.py" "src\arcpy_parquet\geoparquet.py"
+### Implementation for User Story 1
 
-# Remove old directory
-Remove-Item "src\parquet" -Recurse -Force
-```
+- [X] T016 [US1] Implement `features_to_geoparquet` with WKB encoding and metadata writing in `src/arcpy_parquet/geoparquet.py`.
+- [X] T017 [US1] Implement `geoparquet_to_features` with primary/explicit geometry-column selection in `src/arcpy_parquet/geoparquet.py`.
+- [X] T018 [US1] Implement `get_geometry_columns` deterministic output behavior in `src/arcpy_parquet/geoparquet.py`.
+- [X] T019 [US1] Implement explicit partition value normalization and deterministic fallback behavior in `src/arcpy_parquet/geoparquet.py`.
+- [X] T020 [US1] Implement batch-size validation and error messaging in `src/arcpy_parquet/geoparquet.py`.
+- [X] T021 [US1] Add package exports for US1 functions in `src/arcpy_parquet/__init__.py`.
+- [X] T022 [US1] Add/refresh function-level Google-style docstrings and type hints for public API signatures in `src/arcpy_parquet/geoparquet.py`.
+- [X] T023 [US1] Remove obsolete direct public exposure from `src/parquet/__init__.py` by redirecting callers to `src/arcpy_parquet/geoparquet.py`.
+
+**Checkpoint**: User Story 1 is independently functional and testable (MVP).
 
 ---
 
-## Task 4: Update arcpy_parquet/__init__.py Exports
+## Phase 4: User Story 2 - Preserve Existing Consumer Workflows (Priority: P2)
 
-**Priority**: High  
-**Estimated Effort**: 20 minutes  
-**Dependencies**: Task 3
+**Goal**: Keep legacy API/toolbox workflows working while moving implementation to the new GeoParquet API.
 
-### Description
-Update the main package `__init__.py` to export the new GeoParquet functions alongside the existing functions.
+**Independent Test**: Run legacy entry points and toolbox execution paths, verifying functional outputs and deprecation warnings.
 
-### Implementation Details
-Add imports for new functions:
-```python
-from .geoparquet import (
-    features_to_geoparquet,
-    geoparquet_to_features,
-    get_geometry_columns,
-)
-```
+### Tests for User Story 2
 
-Update `__all__` to include:
-- `features_to_geoparquet`
-- `geoparquet_to_features`
-- `get_geometry_columns`
+- [X] T024 [P] [US2] Add deprecation warning and behavior-preservation tests for legacy public functions in `testing/test_compat_deprecations.py`.
+- [ ] T025 [P] [US2] Add regression coverage for legacy conversion entry points in `testing/test_arcpy_parquet.py`.
+- [ ] T026 [P] [US2] Add regression coverage for import behavior with explicit geometry column and overwrite settings in `testing/test_parquet_to_feature_class.py`.
 
-Keep existing exports for backward compatibility:
-- `feature_class_to_parquet`
-- `parquet_to_feature_class`
-- `create_schema_file`
+### Implementation for User Story 2
 
-### Acceptance Criteria
-- [ ] New functions exported in `__init__.py`
-- [ ] Old functions still exported (backward compatibility)
-- [ ] `__all__` list updated with new function names
-- [ ] All functions importable: `from arcpy_parquet import features_to_geoparquet`
-- [ ] No import errors when package is imported
+- [ ] T027 [US2] Refactor legacy public functions to call new API with warnings in `src/arcpy_parquet/__main__.py`.
+- [X] T028 [US2] Implement compatibility routing helpers for legacy signatures in `src/arcpy_parquet/_compat.py`.
+- [ ] T029 [US2] Update toolbox import/export tool execution mapping to new API functions in `arcgis/ArcPy-Parquet-Tools.pyt`.
+- [ ] T030 [US2] Update toolbox XML parameter docs for added/changed arguments in `arcgis/ArcPy-Parquet-Tools.FeatureClassToParquet.pyt.xml` and `arcgis/ArcPy-Parquet-Tools.GeoparquetToFeatureClass.pyt.xml`.
+
+**Checkpoint**: User Story 2 remains independently testable with backward-compatible behavior.
 
 ---
 
-## Task 5: Create Compatibility Layer with Deprecation Warnings
+## Phase 5: User Story 3 - Document and Validate Migration (Priority: P3)
 
-**Priority**: Medium  
-**Estimated Effort**: 1 hour  
-**Dependencies**: Task 4
+**Goal**: Provide migration documentation and reproducible validation steps for maintainers.
 
-### Description
-Add deprecation warnings to the old functions (`feature_class_to_parquet` and `parquet_to_feature_class`) to guide users toward the new API while maintaining backward compatibility.
+**Independent Test**: Follow quickstart and documentation steps from a clean environment and confirm all referenced commands and examples execute successfully.
 
-### Implementation Details
-In `src/arcpy_parquet/__main__.py`, add deprecation warnings at the start of each old function:
+### Tests for User Story 3
 
-```python
-import warnings
+- [ ] T031 [P] [US3] Add quickstart command verification test coverage for documented API imports and smoke scenarios in `testing/test_geoparquet_api.py`.
+- [ ] T032 [P] [US3] Add regression assertions for documented migration examples in `testing/test_compat_deprecations.py`.
 
-def feature_class_to_parquet(...):
-    """..."""
-    warnings.warn(
-        "feature_class_to_parquet is deprecated and will be removed in v1.0.0. "
-        "Use features_to_geoparquet instead for full GeoParquet 1.1 compliance "
-        "and better performance.",
-        DeprecationWarning,
-        stacklevel=2
-    )
-    # existing implementation...
-```
+### Implementation for User Story 3
 
-Similarly for `parquet_to_feature_class`:
-```python
-def parquet_to_feature_class(...):
-    """..."""
-    warnings.warn(
-        "parquet_to_feature_class is deprecated and will be removed in v1.0.0. "
-        "Use geoparquet_to_features instead for full GeoParquet 1.1 compliance "
-        "and better performance.",
-        DeprecationWarning,
-        stacklevel=2
-    )
-    # existing implementation...
-```
+- [X] T033 [US3] Update migration guidance and API examples in `README.md`.
+- [X] T034 [US3] Update toolbox migration and packaging notes in `arcgis/README.md`.
+- [X] T035 [US3] Update feature quickstart validation steps in `specs/main/quickstart.md`.
+- [X] T036 [US3] Update docs source content for new API and compatibility lifecycle in `docsrc/mkdocs/index.md`.
 
-### Acceptance Criteria
-- [ ] Deprecation warnings added to old functions
-- [ ] Warnings include clear migration path
-- [ ] Warnings specify version when functions will be removed (v1.0.0)
-- [ ] Old functions still work correctly
-- [ ] Warning messages are helpful and actionable
+**Checkpoint**: User Story 3 is independently testable through documentation-led validation.
 
 ---
 
-## Task 6: Update Python Toolbox (ArcPy-Parquet-Tools.pyt)
+## Phase 6: Polish & Cross-Cutting Concerns
 
-**Priority**: High  
-**Estimated Effort**: 2 hours  
-**Dependencies**: Task 4
+**Purpose**: Final consistency, governance, and reproducibility validation across all stories.
 
-### Description
-Update the ArcGIS Python Toolbox to use the new efficient GeoParquet functions and expose new parameters.
-
-### Implementation Details
-
-**Files to Update:**
-- `arcgis/ArcPy-Parquet-Tools.pyt`
-
-**Changes Required:**
-
-1. Update imports to use new functions:
-```python
-from arcpy_parquet import (
-    features_to_geoparquet,
-    geoparquet_to_features,
-    get_geometry_columns,
-)
-```
-
-2. Update `FeatureClassToParquet` tool:
-   - Replace call to `feature_class_to_parquet` with `features_to_geoparquet`
-   - Add new parameters:
-     - `include_centroids` (Boolean)
-     - `name` (String, optional)
-     - `batch_size` (Long, default 10000)
-   - Map existing parameters to new function signature
-
-3. Update `GeoparquetToFeatureClass` tool:
-   - Replace call with `geoparquet_to_features`
-   - Add `geometry_column` parameter (String, optional)
-   - Add `batch_size` parameter (Long, default 10000)
-
-4. Consider adding new tool parameter documentation
-
-### Acceptance Criteria
-- [ ] All tools updated to use new functions
-- [ ] New parameters added with appropriate defaults
-- [ ] Tools validate successfully in ArcGIS Pro
-- [ ] Tools execute successfully with test data
-- [ ] Tool help text updated to reflect new parameters
-- [ ] XML documentation files updated
+- [ ] T037 [P] Run full conversion test suite and fix any cross-story regressions in `testing/test_arcpy_parquet.py`, `testing/test_parquet_to_feature_class.py`, and `testing/test_geoparquet_validity.py`.
+- [ ] T038 [P] Validate package exports and import paths consistency in `src/arcpy_parquet/__init__.py` and `src/parquet/__init__.py`.
+- [ ] T039 Validate make/docs reproducibility paths for this feature in `README.md`, `arcgis/README.md`, and `docsrc/mkdocs.yml`.
+- [ ] T040 Perform tracked-file config/security review for this feature scope in `config/config.ini` and `config/secrets.ini`.
+- [ ] T041 Execute quickstart end-to-end and record final validation notes in `specs/main/quickstart.md`.
+- [ ] T042 Measure touched-module coverage and enforce minimum 80% threshold for SC-002 using the existing pytest coverage workflow, with results recorded in CI output.
 
 ---
 
-## Task 7: Update Tests to Use New Functions
+## Dependencies & Execution Order
 
-**Priority**: High  
-**Estimated Effort**: 2-3 hours  
-**Dependencies**: Task 4
+### Phase Dependencies
 
-### Description
-Add comprehensive tests for the new GeoParquet functions while ensuring existing tests for backward compatibility still pass.
+- Setup (Phase 1): starts immediately.
+- Foundational (Phase 2): depends on Setup completion; blocks all user stories.
+- User Story phases (Phase 3-5): depend on Foundational completion; can proceed in parallel when staffed.
+- Polish (Phase 6): depends on completion of all targeted user stories.
 
-### Implementation Details
+### User Story Dependencies
 
-**New Test File:** `testing/test_geoparquet.py`
+- US1 (P1): starts after Phase 2; no dependency on US2/US3.
+- US2 (P2): starts after Phase 2; depends on US1 APIs existing but remains independently testable.
+- US3 (P3): starts after Phase 2; depends on stable API/compat behavior from US1/US2 outputs.
 
-Test coverage should include:
-1. Basic export: feature class → GeoParquet
-2. Basic import: GeoParquet → feature class
-3. Partitioned exports (Hive-style partitioning)
-4. Centroid column generation
-5. Custom geometry columns
-6. Spatial reference handling
-7. Field type conversions
-8. Error handling (missing files, invalid parameters)
-9. Memory efficiency (large datasets with small batches)
-10. GeoParquet 1.1 metadata validation
+### Dependency Graph
 
-**Update Existing Tests:**
-- Ensure `test_arcpy_parquet.py` still passes (old functions)
-- Ensure `test_parquet_to_feature_class.py` still passes
-- Add deprecation warning assertions
-
-**GeoParquet Validation:**
-- Validate `geo` metadata structure
-- Validate PROJJSON CRS encoding
-- Validate geometry column metadata
-- Validate WKB encoding
-
-### Acceptance Criteria
-- [ ] New test file created with comprehensive coverage
-- [ ] All new tests pass
-- [ ] Existing tests still pass (backward compatibility)
-- [ ] GeoParquet 1.1 spec compliance validated
-- [ ] Tests cover error conditions
-- [ ] Tests validate partitioning functionality
-- [ ] Tests validate centroid generation
-- [ ] Test coverage > 80% for new code
-
-### Example Test Structure
-```python
-def test_features_to_geoparquet_basic():
-    """Test basic feature class to GeoParquet export."""
-    # Setup test feature class
-    # Export to GeoParquet
-    # Validate output exists
-    # Validate GeoParquet metadata
-    # Validate row count matches
-
-def test_geoparquet_partitioning():
-    """Test Hive-style partitioning."""
-    # Export with partition_fields
-    # Validate directory structure
-    # Validate partition values
-```
+- US1 -> US2 -> US3 for incremental delivery.
+- US1 alone is the suggested MVP scope.
+- US2 and US3 can run in parallel after US1 interface stabilization if team capacity supports it.
 
 ---
 
-## Task 8: Update Documentation and Examples
+## Parallel Execution Examples
 
-**Priority**: Medium  
-**Estimated Effort**: 2-3 hours  
-**Dependencies**: Task 4
+### User Story 1
 
-### Description
-Update all documentation to showcase the new GeoParquet functions, provide migration guidance, and update code examples.
+- Run T011, T012, T013, T014, and T015 concurrently because they touch different test files.
 
-### Implementation Details
+### User Story 2
 
-**Files to Update:**
-1. `README.md` - Main project README
-2. `arcgis/README.md` - ArcGIS toolbox documentation
-3. Documentation source files in `docsrc/`
-4. Docstrings in code (already present in geoparquet.py)
+- Run T024, T025, and T026 concurrently because they target separate regression suites.
 
-**Documentation Sections to Add/Update:**
+### User Story 3
 
-1. **Quick Start Examples:**
-```python
-from arcpy_parquet import features_to_geoparquet, geoparquet_to_features
-
-# Export feature class to GeoParquet
-features_to_geoparquet(
-    feature_class=r"C:\data\my.gdb\counties",
-    output_path=r"C:\data\counties_parquet",
-)
-
-# Import GeoParquet to feature class
-geoparquet_to_features(
-    parquet_path=r"C:\data\counties_parquet",
-    feature_class=r"C:\data\output.gdb\counties",
-)
-```
-
-2. **Migration Guide:**
-- Side-by-side comparison of old vs new API
-- Parameter mapping guide
-- Benefits of migrating
-- Deprecation timeline
-
-3. **Advanced Features:**
-- Hive-style partitioning examples
-- Centroid generation examples
-- Custom geometry columns
-- Memory optimization tips
-
-4. **GeoParquet 1.1 Compliance:**
-- What makes it compliant
-- Metadata structure
-- Interoperability with other tools (QGIS, DuckDB, etc.)
-
-5. **API Reference:**
-- Complete function signatures
-- Parameter descriptions
-- Return values
-- Examples for each function
-
-### Acceptance Criteria
-- [ ] README.md updated with new examples
-- [ ] Migration guide created
-- [ ] Advanced features documented
-- [ ] GeoParquet 1.1 compliance section added
-- [ ] API reference updated
-- [ ] All code examples tested and verified
-- [ ] Documentation builds successfully (mkdocs)
-- [ ] Links and references validated
+- Run T031 and T032 concurrently because quickstart and migration regressions are isolated.
 
 ---
 
-## Post-Integration Tasks
+## Implementation Strategy
 
-### Testing & Validation
-- [ ] Run full test suite
-- [ ] Test with real-world datasets
-- [ ] Performance benchmarking (old vs new implementation)
-- [ ] Memory profiling
-- [ ] Test in ArcGIS Pro environment
+### MVP First (US1 Only)
 
-### Release Preparation
-- [ ] Update `VERSION` file
-- [ ] Update `CHANGELOG.md` with new features
-- [ ] Tag release in git
-- [ ] Build and test package distribution
-- [ ] Update PyPI metadata
+1. Complete Phase 1 and Phase 2.
+2. Deliver Phase 3 (US1).
+3. Validate US1 independently via API contract, metadata validity, and roundtrip tests.
+4. Demo or release MVP.
 
-### Communication
-- [ ] Announce new features to users
-- [ ] Provide migration timeline
-- [ ] Update any external documentation or tutorials
+### Incremental Delivery
 
----
+1. Deliver US1 (core new API).
+2. Deliver US2 (backward compatibility and toolbox mapping).
+3. Deliver US3 (migration docs and validation).
+4. Finish with Phase 6 polish.
 
-## Migration Timeline
+### Parallel Team Strategy
 
-- **v0.3.0** (Current): Introduce new functions, deprecate old ones
-- **v0.4.0 - v0.9.x**: Maintain both implementations
-- **v1.0.0**: Remove deprecated functions
-
----
-
-## Benefits Summary
-
-### Performance Improvements
-- Streaming architecture reduces memory footprint by ~70%
-- Smaller default batch size (10K vs 300K) improves responsiveness
-- No pandas overhead for core conversions
-
-### Compliance & Standards
-- Full GeoParquet 1.1 specification compliance
-- Proper PROJJSON CRS encoding
-- Correct geometry type metadata
-- Interoperable with other GeoParquet tools
-
-### New Features
-- Hive-style partitioning for large datasets
-- Optional centroid columns for spatial indexing
-- Custom geometry column selection
-- Better error handling and validation
-
-### Code Quality
-- Complete type hints throughout
-- Comprehensive docstrings (Google style)
-- Cleaner, more maintainable code
-- Better separation of concerns
-
----
-
-## Risk Mitigation
-
-1. **Backward Compatibility**: Keep old functions with clear deprecation path
-2. **Testing**: Comprehensive test suite before removing old code
-3. **Documentation**: Clear migration guide and examples
-4. **Timeline**: Long deprecation period (multiple versions)
-5. **Validation**: Test against existing workflows and toolbox integrations
+1. Team completes Setup + Foundational together.
+2. After Phase 2:
+   - Developer A leads US1 implementation.
+   - Developer B prepares US2 test scaffolding and compatibility tests.
+   - Developer C prepares US3 documentation updates.
+3. Merge sequentially by dependency, then run Phase 6 cross-cutting validation.

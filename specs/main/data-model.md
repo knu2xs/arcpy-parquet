@@ -2,74 +2,71 @@
 
 ## Entity: ConversionJob
 
-- Purpose: Encapsulates runtime configuration for export/import operations.
+- Purpose: Runtime configuration for one export or import operation.
 - Fields:
-  - `job_id` (string): Unique identifier for traceability.
+  - `job_id` (string): Trace identifier.
   - `operation` (enum): `export` or `import`.
-  - `source_path` (string): Input feature class path or GeoParquet dataset path.
-  - `target_path` (string): Output dataset path or feature class path.
-  - `fields` (list[string] | null): Selected attributes for export.
-  - `partition_fields` (list[string] | null): Partition key fields for export.
-  - `geometry_column` (string | null): Geometry column for import.
-  - `batch_size` (int): Record batch size.
-  - `overwrite` (bool): Replace existing output.
-  - `include_centroids` (bool): Add centroid geometry column on export.
-  - `name` (string | null): Optional dataset part-name prefix.
+  - `source_path` (string): Input feature class or parquet dataset path.
+  - `target_path` (string): Output dataset or feature class path.
+  - `fields` (list[string] | null): Selected non-geometry fields.
+  - `partition_fields` (list[string] | null): Export partition keys.
+  - `geometry_column` (string | null): Selected geometry column for import.
+  - `batch_size` (int): Processing batch size.
+  - `overwrite` (bool): Output replacement flag.
+  - `include_centroids` (bool): Optional centroid column output.
+  - `name` (string | null): Optional part file prefix.
 - Validation rules:
   - `batch_size` must be > 0.
-  - `partition_fields` values must exist in selected attributes.
-  - `geometry_column` must exist in GeoParquet geometry metadata on import.
+  - `partition_fields` must be a subset of available/exported fields.
+  - `geometry_column` must be present in declared GeoParquet geometry metadata when provided.
 
 ## Entity: GeoParquetDataset
 
-- Purpose: Represents persisted GeoParquet output/input with required metadata.
+- Purpose: File or directory-based dataset conforming to GeoParquet metadata expectations.
 - Fields:
-  - `path` (string): Dataset root or single file path.
+  - `path` (string): Single-file or dataset root path.
   - `layout` (enum): `single_file`, `dataset`, `hive_partitioned`.
-  - `part_file_pattern` (string): `part-<name?>_<runid>-<i>.parquet` pattern.
-  - `geo_metadata` (object): GeoParquet metadata payload (`version`, `primary_column`, `columns`).
-  - `columns` (list[ColumnDescriptor]): Logical schema columns.
+  - `geo_metadata` (object): `geo` metadata block (`version`, `primary_column`, `columns`).
+  - `partitions` (list[PartitionDescriptor] | null): Optional partition descriptors.
+  - `columns` (list[ColumnDescriptor]): Physical/logical schema descriptors.
 - Validation rules:
-  - Must include `geo` metadata with `version` and `primary_column`.
-  - Primary geometry column must use `WKB` encoding.
+  - Must include required `geo` metadata keys for conforming output.
+  - Primary geometry column must be WKB-encoded.
 
 ## Entity: GeometryColumnDescriptor
 
-- Purpose: Defines geometry column semantics from GeoParquet metadata.
+- Purpose: Logical description of geometry columns for import/export behavior.
 - Fields:
   - `name` (string): Column name.
   - `encoding` (enum): Expected `WKB`.
-  - `geometry_types` (list[string]): Allowed geometry types.
-  - `crs` (object | null): CRS object, typically PROJJSON-derived.
-  - `is_primary` (bool): Whether this column is primary for feature class creation.
+  - `geometry_types` (list[string]): Declared geometry type set.
+  - `crs` (object | null): CRS payload from metadata.
+  - `is_primary` (bool): Primary geometry selector.
 - Validation rules:
-  - `encoding` must be `WKB`.
-  - `geometry_types` must be non-empty for strict validation.
+  - `encoding` must equal `WKB`.
+  - `name` must map to an existing schema column.
 
 ## Entity: ToolParameterMapping
 
-- Purpose: Maps ArcGIS toolbox parameters to Python API args.
+- Purpose: Translation contract from ArcGIS toolbox parameters to Python API arguments.
 - Fields:
-  - `tool_name` (string): Toolbox tool class name.
-  - `parameter_name` (string): UI parameter key.
-  - `api_argument` (string): Target API argument.
+  - `tool_name` (string): Toolbox class/tool identity.
+  - `parameter_name` (string): ArcGIS parameter key.
+  - `api_argument` (string): Python function argument name.
   - `required` (bool): Requirement status.
-  - `default_value` (any): Default when omitted.
+  - `default_value` (any): Applied default when omitted.
 - Validation rules:
-  - Required parameters must map to non-null API arguments.
-  - Added parameters (`batch_size`, `geometry_column`, `include_centroids`, `name`) must have documented defaults.
+  - Required toolbox parameters must map to non-null required API arguments.
+  - Added optional parameters (`batch_size`, `geometry_column`, `include_centroids`, `name`) must have deterministic defaults.
 
 ## Relationships
 
-- A `ConversionJob` produces or consumes one `GeoParquetDataset`.
-- A `GeoParquetDataset` has one or more `GeometryColumnDescriptor` entries.
-- A toolbox execution uses multiple `ToolParameterMapping` rows to build one `ConversionJob`.
+- One `ConversionJob` reads from or writes to one `GeoParquetDataset`.
+- One `GeoParquetDataset` has one or more `GeometryColumnDescriptor` entries.
+- A toolbox execution resolves a set of `ToolParameterMapping` entries into one `ConversionJob`.
 
 ## State Transitions
 
-- ConversionJob lifecycle:
-  - `draft` -> `validated` -> `running` -> (`completed` | `failed`).
-- GeoParquetDataset lifecycle (export path):
-  - `not_created` -> `writing_parts` -> `metadata_finalized` -> `available`.
-- Compatibility lifecycle:
-  - `legacy_api_active` -> `legacy_api_warned` -> `legacy_api_removed` (future major release).
+- `ConversionJob`: `draft` -> `validated` -> `running` -> (`completed` | `failed`).
+- `GeoParquetDataset` (export): `not_created` -> `writing` -> `metadata_finalized` -> `available`.
+- Compatibility lifecycle: `legacy_active` -> `legacy_warned` -> `legacy_removed` (future major release).
