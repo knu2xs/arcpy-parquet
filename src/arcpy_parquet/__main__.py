@@ -14,8 +14,8 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 from tqdm import tqdm
 
-from arcpy_parquet.utils import get_logger, pyarrow_utils
-from arcpy_parquet.utils.pyarrow_utils import (
+from .utils import get_logger, pyarrow_utils
+from .utils.pyarrow_utils import (
     get_geoparquet_header,
     get_parquet_max_string_lengths,
 )

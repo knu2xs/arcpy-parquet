@@ -23,6 +23,13 @@ def tmp_pqt():
     tmpdir.cleanup()
 
 
+@pytest.fixture(scope="function")
+def tmp_geoparquet_output(tmp_dir):
+    out_path = tmp_dir / "geoparquet_output"
+    out_path.mkdir(parents=True, exist_ok=True)
+    yield out_path
+
+
 @pytest.fixture(scope="session")
 def tmp_gdb(tmp_dir):
     # get a file geodatabase in the temporary directory

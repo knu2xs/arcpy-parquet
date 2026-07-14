@@ -6,6 +6,11 @@ This test suite provides comprehensive testing for the `parquet_to_feature_class
 
 ## Test Organization
 
+### New GeoParquet API Tests
+- `test_geoparquet_api.py`: Public API export and validation behavior for the new conversion functions
+- `test_geoparquet_roundtrip.py`: Roundtrip and partitioned export behavior checks
+- `test_compat_deprecations.py`: Deprecation warning behavior for legacy entry points
+
 ### GeoParquet Format Tests
 - `test_geoparquet_point`: Basic point geometry conversion
 - `test_geoparquet_polyline`: LineString geometry conversion
@@ -57,8 +62,6 @@ This test suite provides comprehensive testing for the `parquet_to_feature_class
 - `pytest`: Test framework
 
 ### Optional
-- `shapely`: Required for creating test GeoParquet files (most tests)
-  - Tests requiring shapely will be skipped if not installed
 - `h3`: Required for H3 format tests
   - H3 tests will be skipped if not installed
 
@@ -140,9 +143,6 @@ Defined in `conftest.py`:
 3. H3 format requires the `h3` package to be installed
 
 ## Troubleshooting
-
-### Tests skip with "shapely package not installed"
-Install shapely: `pip install shapely`
 
 ### Tests skip with "h3 package not installed"
 Install h3: `pip install h3`

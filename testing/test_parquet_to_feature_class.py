@@ -44,13 +44,29 @@ logger = arcpy_parquet.utils.get_logger(logger_name=Path(__file__).stem, level="
 arcpy.env.overwriteOutput = True
 
 # check if optional dependencies are available
-HAS_SHAPELY = importlib.util.find_spec("shapely") is not None
 HAS_H3 = importlib.util.find_spec("h3") is not None
 
 
 # ========================================================================================
 # Helper Functions
 # ========================================================================================
+
+
+def _point_wkb(x: float, y: float, sr: arcpy.SpatialReference) -> bytes:
+    """Build WKB bytes for a point using ArcPy geometry APIs only."""
+    return bytes(arcpy.PointGeometry(arcpy.Point(x, y), sr).WKB)
+
+
+def _polyline_wkb(points: list[tuple[float, float]], sr: arcpy.SpatialReference) -> bytes:
+    """Build WKB bytes for a polyline using ArcPy geometry APIs only."""
+    arr = arcpy.Array([arcpy.Point(x, y) for x, y in points])
+    return bytes(arcpy.Polyline(arr, sr).WKB)
+
+
+def _polygon_wkb(points: list[tuple[float, float]], sr: arcpy.SpatialReference) -> bytes:
+    """Build WKB bytes for a polygon using ArcPy geometry APIs only."""
+    arr = arcpy.Array([arcpy.Point(x, y) for x, y in points])
+    return bytes(arcpy.Polygon(arr, sr).WKB)
 
 
 def create_test_geoparquet(
@@ -74,8 +90,8 @@ def create_test_geoparquet(
         Path to created GeoParquet file.
     """
     import json
-    from shapely import wkb
-    from shapely.geometry import Point, LineString, Polygon
+
+    sr = arcpy.SpatialReference(spatial_reference)
 
     # create sample data
     data = {
@@ -86,43 +102,45 @@ def create_test_geoparquet(
 
     # create geometries based on type
     if geometry_type == "Point":
-        geoms = [Point(i * 0.1, i * 0.1).wkb for i in range(num_rows)]
+        geoms = [_point_wkb(i * 0.1, i * 0.1, sr) for i in range(num_rows)]
         if include_multiple_geometries:
-            geoms2 = [Point(i * 0.2, i * 0.2).wkb for i in range(num_rows)]
+            geoms2 = [_point_wkb(i * 0.2, i * 0.2, sr) for i in range(num_rows)]
     elif geometry_type == "LineString":
         geoms = [
-            LineString([(i * 0.1, i * 0.1), (i * 0.1 + 1, i * 0.1 + 1)]).wkb
+            _polyline_wkb([(i * 0.1, i * 0.1), (i * 0.1 + 1, i * 0.1 + 1)], sr)
             for i in range(num_rows)
         ]
         if include_multiple_geometries:
             geoms2 = [
-                LineString([(i * 0.2, i * 0.2), (i * 0.2 + 1, i * 0.2 + 1)]).wkb
+                _polyline_wkb([(i * 0.2, i * 0.2), (i * 0.2 + 1, i * 0.2 + 1)], sr)
                 for i in range(num_rows)
             ]
     elif geometry_type == "Polygon":
         geoms = [
-            Polygon(
+            _polygon_wkb(
                 [
                     (i * 0.1, i * 0.1),
                     (i * 0.1 + 1, i * 0.1),
                     (i * 0.1 + 1, i * 0.1 + 1),
                     (i * 0.1, i * 0.1 + 1),
                     (i * 0.1, i * 0.1),
-                ]
-            ).wkb
+                ],
+                sr,
+            )
             for i in range(num_rows)
         ]
         if include_multiple_geometries:
             geoms2 = [
-                Polygon(
+                _polygon_wkb(
                     [
                         (i * 0.2, i * 0.2),
                         (i * 0.2 + 1, i * 0.2),
                         (i * 0.2 + 1, i * 0.2 + 1),
                         (i * 0.2, i * 0.2 + 1),
                         (i * 0.2, i * 0.2),
-                    ]
-                ).wkb
+                    ],
+                    sr,
+                )
                 for i in range(num_rows)
             ]
     else:
@@ -280,7 +298,6 @@ def validate_feature_class(
 # ========================================================================================
 
 
-@pytest.mark.skipif(not HAS_SHAPELY, reason="shapely package not installed")
 def test_geoparquet_point(tmp_gdb, tmp_pqt):
     """Test converting GeoParquet with Point geometries."""
     # create test data
@@ -306,7 +323,6 @@ def test_geoparquet_point(tmp_gdb, tmp_pqt):
     )
 
 
-@pytest.mark.skipif(not HAS_SHAPELY, reason="shapely package not installed")
 def test_geoparquet_polyline(tmp_gdb, tmp_pqt):
     """Test converting GeoParquet with LineString geometries."""
     # create test data
@@ -332,7 +348,6 @@ def test_geoparquet_polyline(tmp_gdb, tmp_pqt):
     )
 
 
-@pytest.mark.skipif(not HAS_SHAPELY, reason="shapely package not installed")
 def test_geoparquet_polygon(tmp_gdb, tmp_pqt):
     """Test converting GeoParquet with Polygon geometries."""
     # create test data
@@ -358,7 +373,6 @@ def test_geoparquet_polygon(tmp_gdb, tmp_pqt):
     )
 
 
-@pytest.mark.skipif(not HAS_SHAPELY, reason="shapely package not installed")
 def test_geoparquet_multiple_geometries(tmp_gdb, tmp_pqt):
     """Test converting GeoParquet with multiple geometry columns."""
     # create test data with multiple geometry columns
@@ -395,7 +409,6 @@ def test_geoparquet_multiple_geometries(tmp_gdb, tmp_pqt):
     ), "Secondary geometry column should not be a field"
 
 
-@pytest.mark.skipif(not HAS_SHAPELY, reason="shapely package not installed")
 def test_geoparquet_different_spatial_reference(tmp_gdb, tmp_pqt):
     """Test converting GeoParquet with different spatial references."""
     # create test data with Web Mercator
@@ -420,7 +433,6 @@ def test_geoparquet_different_spatial_reference(tmp_gdb, tmp_pqt):
     )
 
 
-@pytest.mark.skipif(not HAS_SHAPELY, reason="shapely package not installed")
 def test_geoparquet_sample_count(tmp_gdb, tmp_pqt):
     """Test importing only a sample of records."""
     # create test data
@@ -443,7 +455,6 @@ def test_geoparquet_sample_count(tmp_gdb, tmp_pqt):
     )
 
 
-@pytest.mark.skipif(not HAS_SHAPELY, reason="shapely package not installed")
 def test_geoparquet_no_spatial_index(tmp_gdb, tmp_pqt):
     """Test converting GeoParquet without building spatial index."""
     # create test data
@@ -466,7 +477,6 @@ def test_geoparquet_no_spatial_index(tmp_gdb, tmp_pqt):
     )
 
 
-@pytest.mark.skipif(not HAS_SHAPELY, reason="shapely package not installed")
 def test_geoparquet_no_compact(tmp_gdb, tmp_pqt):
     """Test converting GeoParquet without compacting."""
     # create test data
@@ -639,7 +649,6 @@ def test_geoparquet_missing_metadata(tmp_gdb, tmp_pqt):
         )
 
 
-@pytest.mark.skipif(not HAS_SHAPELY, reason="shapely package not installed")
 def test_geoparquet_invalid_geometry_column(tmp_gdb, tmp_pqt):
     """Test error when geometry column doesn't exist in schema."""
     import json
@@ -848,7 +857,6 @@ def test_coordinates_with_schema(tmp_gdb):
 # ========================================================================================
 
 
-@pytest.mark.skipif(not HAS_SHAPELY, reason="shapely package not installed")
 def test_complex_data_types(tmp_gdb, tmp_pqt):
     """Test handling of complex data types (arrays, structs)."""
     # create parquet with complex types
@@ -864,9 +872,8 @@ def test_complex_data_types(tmp_gdb, tmp_pqt):
     }
 
     # create GeoParquet with complex types
-    from shapely.geometry import Point
-
-    data["geometry"] = [Point(i, i).wkb for i in range(3)]
+    sr = arcpy.SpatialReference(4326)
+    data["geometry"] = [_point_wkb(i, i, sr) for i in range(3)]
 
     table = pa.Table.from_pydict(data)
 
@@ -906,7 +913,6 @@ def test_complex_data_types(tmp_gdb, tmp_pqt):
     assert field_dict["metadata"] == "String", "metadata field should be String type"
 
 
-@pytest.mark.skipif(not HAS_SHAPELY, reason="shapely package not installed")
 def test_long_string_fields(tmp_gdb, tmp_pqt):
     """Test handling of long string fields."""
     # create parquet with long strings
@@ -918,9 +924,8 @@ def test_long_string_fields(tmp_gdb, tmp_pqt):
     }
 
     # create GeoParquet
-    from shapely.geometry import Point
-
-    data["geometry"] = [Point(i, i).wkb for i in range(3)]
+    sr = arcpy.SpatialReference(4326)
+    data["geometry"] = [_point_wkb(i, i, sr) for i in range(3)]
 
     table = pa.Table.from_pydict(data)
 
@@ -1001,12 +1006,12 @@ def test_roundtrip_geoparquet(tmp_gdb, tmp_pqt):
     )
 
 
-@pytest.mark.skipif(not HAS_SHAPELY, reason="shapely package not installed")
 def test_partitioned_dataset(tmp_gdb, tmp_pqt):
     """Test converting a partitioned Parquet dataset."""
     # create partitioned dataset
     import json
-    from shapely.geometry import Point
+
+    sr = arcpy.SpatialReference(4326)
 
     # create data for multiple partitions
     for year in [2023, 2024]:
@@ -1016,7 +1021,7 @@ def test_partitioned_dataset(tmp_gdb, tmp_pqt):
                 "year": [year] * 10,
                 "month": [month] * 10,
                 "value": [i * 10.5 for i in range(10)],
-                "geometry": [Point(i, i).wkb for i in range(10)],
+                "geometry": [_point_wkb(i, i, sr) for i in range(10)],
             }
 
             table = pa.Table.from_pydict(data)
@@ -1051,19 +1056,19 @@ def test_partitioned_dataset(tmp_gdb, tmp_pqt):
     )
 
 
-@pytest.mark.skipif(not HAS_SHAPELY, reason="shapely package not installed")
 def test_specific_partition(tmp_gdb, tmp_pqt):
     """Test converting a specific partition from a Parquet dataset."""
     # create partitioned dataset
     import json
-    from shapely.geometry import Point
+
+    sr = arcpy.SpatialReference(4326)
 
     for year in [2023, 2024]:
         data = {
             "id": list(range(10)),
             "year": [year] * 10,
             "value": [i * 10.5 for i in range(10)],
-            "geometry": [Point(i, i).wkb for i in range(10)],
+            "geometry": [_point_wkb(i, i, sr) for i in range(10)],
         }
 
         table = pa.Table.from_pydict(data)

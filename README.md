@@ -16,6 +16,40 @@ Conversion utilties for Parquet data using ArcPy.
   look in the `./notebooks` directory. If GIS is more your schtick, open the project 
   `./arcgis/arcpy-parquet.aprx`.
 
+## GeoParquet API (Recommended)
+
+The primary API surface for new work is:
+
+- `features_to_geoparquet`
+- `geoparquet_to_features`
+- `get_geometry_columns`
+
+```python
+from arcpy_parquet import features_to_geoparquet, geoparquet_to_features
+
+dataset_dir = features_to_geoparquet(
+  feature_class=r"data/sample/sample.gdb/sample_layer",
+  output_path=r"data/interim/roundtrip_dataset",
+  batch_size=10000,
+  overwrite=True,
+)
+
+geoparquet_to_features(
+  parquet_path=dataset_dir,
+  feature_class=r"data/interim/interim.gdb/roundtrip_layer",
+  overwrite=True,
+)
+```
+
+## Migration Guide
+
+Legacy function names continue to work during the migration window, but they now emit deprecation warnings:
+
+- `feature_class_to_parquet` -> `features_to_geoparquet`
+- `parquet_to_feature_class` -> `geoparquet_to_features`
+
+Migrate to the new names for GeoParquet 1.1 metadata behavior and forward compatibility.
+
 ## Using Make - common commands
 
 Based on the pattern provided in the 

@@ -14,3 +14,22 @@ which can be used in ArcGIS Pro.
 If you download the entire ArcPy Parquet repository to your local machine, and keep all the downloaded assets 
 together in the same location, you do not need to customize your Python configuration at all. The toolbox knows 
 how to find the Python package relative to itself, and will include all functionality.
+
+## Recommended API Surface
+
+For new integrations, use:
+
+- `features_to_geoparquet`
+- `geoparquet_to_features`
+- `get_geometry_columns`
+
+These functions are intended to be the stable GeoParquet-focused interface.
+
+## Legacy API Migration
+
+Legacy entry points remain available during transition and emit deprecation warnings:
+
+- `feature_class_to_parquet` -> `features_to_geoparquet`
+- `parquet_to_feature_class` -> `geoparquet_to_features`
+
+Update callers to the new names to align with ongoing conversion behavior and documentation.
