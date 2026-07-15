@@ -2,6 +2,8 @@
 site_name = "ArcPy Parquet 0.3.0"
 docs_dir = "docsrc/mkdocs"
 site_dir = "docs"
+repo_url = "https://github.com/knu2xs/arcpy-parquet/"
+repo_name = "knu2xs/arcpy-parquet"
 
 nav = [
   { Home = "index.md" },
