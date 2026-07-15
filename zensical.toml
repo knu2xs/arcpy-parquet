@@ -12,6 +12,25 @@ nav = [
 [project.theme]
 variant = "classic"
 
+[project.theme.icon]
+logo = "fontawesome/solid/globe-americas"
+
+# Default dark palette, matching the previous feel more closely
+[[project.theme.palette]]
+scheme = "slate"
+primary = "blue"
+accent = "green"
+toggle.icon = "lucide/moon"
+toggle.name = "Switch to light mode"
+
+# Light palette
+[[project.theme.palette]]
+scheme = "default"
+primary = "blue"
+accent = "green"
+toggle.icon = "lucide/sun"
+toggle.name = "Switch to dark mode"
+
 [project.plugins.mkdocstrings]
 enable_inventory = true
 default_handler = "python"
