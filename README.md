@@ -1,22 +1,20 @@
 # ArcPy Parquet
 
-Conversion utilties for Parquet data using ArcPy.
+Conversion utilities for conversion to and from Parquet data using ArcPy.
 
-## Getting Started
+## ArcPy Parquet Python Toolbox
 
-1 - Clone this repo.
+The ArcGIS Pro Python toolbox is provided as `arcgis/ArcPy-Parquet-Tools.pyt`.
+It includes the following geoprocessing tools:
 
-2 - Create an environment with the requirements.
-    
-```
-make env
-```
+- `FeatureClassToParquet`: exports ArcGIS feature classes/tables to Parquet datasets (GeoParquet by default).
+- `GeoparquetToFeatureClass`: imports Parquet/GeoParquet datasets into ArcGIS feature classes.
+- `CreateSchemaFile`: creates CSV schema templates to standardize field definitions for conversion workflows.
 
-3 - Explore - If you are more into Python, a good place to start is `jupyter lab` from the root of the project, and 
-  look in the `./notebooks` directory. If GIS is more your schtick, open the project 
-  `./arcgis/arcpy-parquet.aprx`.
+These tools use the same core implementation as the Python package, so toolbox behavior aligns with the
+`features_to_parquet`, `parquet_to_features`, and `create_schema_file` functions in the `arcpy_parquet` package.
 
-## Conversion API (Recommended)
+## Python API
 
 The primary API surface for new work is:
 
@@ -31,7 +29,7 @@ dataset_dir = features_to_parquet(
   input_features=r"data/sample/sample.gdb/sample_layer",
   output_parquet=r"data/interim/roundtrip_dataset",
   geometry_format="GEOPARQUET",
-  batch_size=10000,
+  batch_size=50000,
 )
 
 parquet_to_features(
@@ -44,46 +42,8 @@ parquet_to_features(
 ### Geometry Format Notes
 
 - `GEOPARQUET` is the default geometry format for export and writes GeoParquet metadata.
-- `WKB` is not a supported top-level `geometry_format` value.
 - `XY` writes two columns named `x_lon` and `y_lat`.
 - `H3` writes H3 indices: a single index string for points, and JSON-encoded intersecting indices for lines/polygons.
-
-## Using Make - common commands
-
-Based on the pattern provided in the 
-[Cookiecutter Data Science template by Driven Data](https://drivendata.github.io/cookiecutter-data-science/) this 
-template streamlines a number of commands using the `make` command pattern.
-
-- `make env` - Clone the default ArcGIS Pro Conda environment, `arcgispro-pyu3`, add all the dependencies in
-  `environment.yml` and install the local project package using the command 
-  `python -m pip install -e ./src/src/<project_package>` so you can easily test against the package as you are 
-  developing it.
-
-- `make data` - Run `./scripts/make_data.py`, which should be the data pipeline to create an output dataset.
-
-- `make pytpkg` - Create a zipped achive of the Python (`*.pyt`) toolbox located in `./arcgis`. This uses the script,
-  `./scripts/make_pyt_archive.py`, to collect the Python toolbox (`*.pyt`) along with all the supporting 
-  dependencies listed in `pyproject.toml` and `*.xml` files with the tool documentation, and put into a zipped archive 
-  ready for sharing.
-
-- `make docserve` - Run live MkDocs documentation server to view documentation updates at http://127.0.0.1:8000.
-
-- `make docs` - Build the documentation using MkDocs from files in `./docsrc` and save the output in `./docs`.
-
-- `make test` - activates the environment created by the `make env` or `make env_clone` and runs all the tests in the 
-  `./testing` directory using PyTest. 
-
-## BumpVersion Cliff Notes
-
-[Bump2Version](https://github.com/c4urself/bump2version) is preconfigured based on hints from 
-[this article on Medium](https://williamhayes.medium.com/versioning-using-bumpversion-4d13c914e9b8).
-
-If you want to...
-
-- apply a patch, `bumpversion patch`
-- update version with no breaking changes (minor version update), `bumpversion minor`
-- update version with breaking changes (major version update), `bumpversion major`
-- create a release (tagged in version control - Git), `bumpversion --tag release`
 
 <p><small>Project based on the <a target="_blank" href="https://github.com/knu2xs/cookiecutter-geoai">cookiecutter 
 GeoAI project template</a>. This template, in turn, is simply an extension and light modification of the 
