@@ -41,14 +41,14 @@ GOTO %1
     CALL conda run -p %CONDA_DIR% python scripts/make_data.py
     GOTO end
 
-:: Make documentation using MkDocs!
+:: Make documentation using Zensical
 :docs
-    CALL conda run --no-capture-output -p %CONDA_DIR% mkdocs build -f ./docsrc/mkdocs.yml
+    CALL conda run --no-capture-output -p %CONDA_DIR% zensical build -f ./zensical.toml
     GOTO end
 
-:: MkDocs live documentation server
+:: Zensical live documentation server
 :docserve
-    CALL conda run --no-capture-output -p %CONDA_DIR% mkdocs serve -f ./docsrc/mkdocs.yml
+    CALL conda run --no-capture-output -p %CONDA_DIR% zensical serve -f ./zensical.toml
     GOTO end
 
 :: Build the local environment from the environment file

@@ -1,0 +1,54 @@
+name: Documentation
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "src/**/*.py"
+      - "docsrc/**/*"
+      - "zensical.toml"
+      - ".github/workflows/**/*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/configure-pages@v6
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install Python Packages
+        run: pip install -r docsrc/requirements.txt
+      - name: Build Documentation using Zensical
+        run: zensical build --clean -f zensical.toml
+      - name: Check Permissions
+        run: |
+          chmod -c -R +rX "docs/" | while read line; do
+            echo "::warning title=Invalid file permissions automatically fixed::$line"
+          done
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: "docs"
+
+  deploy:
+    needs: build
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v5
